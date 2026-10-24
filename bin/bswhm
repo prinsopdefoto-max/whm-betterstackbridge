@@ -1,0 +1,108 @@
+#!/usr/local/cpanel/3rdparty/bin/perl
+# StatusBridge for WHM - command line / cron entry point.
+
+use strict;
+use warnings;
+
+use FindBin ();
+use lib "$FindBin::RealBin/../lib", '/opt/betterstack-whm/lib';
+
+use BetterStack::WHM::Config ();
+use BetterStack::WHM::Engine ();
+use BetterStack::WHM::Checks ();
+use BetterStack::WHM::API ();
+use BetterStack::WHM::I18N qw(T render render_msg);
+use BetterStack::WHM::UIStrings ();
+
+binmode STDOUT, ':encoding(UTF-8)';
+
+my $cmd = shift @ARGV // 'help';
+
+# Messages in the configured language (WHM language, else status page language).
+{
+    my $cfg = BetterStack::WHM::Config::load();
+    $BetterStack::WHM::I18N::LANG = BetterStack::WHM::Engine::admin_lang($cfg);
+}
+
+sub errors { print T( 'cli.error', render_msg($_) ), "\n" for @{ $_[0] || [] } }
+
+my %commands = (
+    run => sub {
+        # Called every minute from cron; only checks that are due run.
+        my $r = BetterStack::WHM::Engine::run( force => scalar grep { $_ eq '--force' } @ARGV );
+        if ( $r->{error} ) { print render_msg( $r->{error} ), "\n"; return 0 }
+        errors( $r->{errors} );
+        print T( 'cli.ran', $r->{ran} ), "\n" if -t STDOUT;
+        return 1;
+    },
+    sync => sub {
+        my $r = BetterStack::WHM::Engine::run( sync => 1, wait => 1 );
+        errors( $r->{errors} );
+        print T( $r->{ok} ? 'cli.sync_ok' : 'cli.sync_errors' ), "\n";
+        return $r->{ok};
+    },
+    status => sub {
+        my $cfg = BetterStack::WHM::Config::load();
+        my $st  = BetterStack::WHM::Config::load_state();
+        my $all = BetterStack::WHM::Checks::discover_all($cfg);
+        printf "%-28s %-5s %-30s %s\n", 'CHECK', 'STAT', 'HEARTBEAT', 'DETAIL';
+        for my $i (@$all) {
+            my $r   = $st->{results}{ $i->{id} } || {};
+            my $key = BetterStack::WHM::Engine::unit_key( $cfg, $i );
+            my $it  = $st->{items}{$key} || {};
+            my $hb  = !$i->{enabled} ? '-'
+              : ( $key =~ /^cat:(.*)/ ? T( 'cli.bundle', BetterStack::WHM::Checks::category_label($1) ) : T('cli.own') )
+              . ( $it->{resource_id} ? '' : ' ' . T('cli.unlinked') );
+            printf "%-28s %-5s %-30s %s\n", $i->{id}, $i->{enabled} ? ( $r->{status} // '-' ) : T('cli.off'), $hb, render( $r->{detail} );
+        }
+        my $units = BetterStack::WHM::Engine::units( $cfg, [ grep { $_->{enabled} } @$all ] );
+        print "\n", T( 'cli.heartbeats', scalar @$units ), "\n";
+        my $e = $st->{last_sync_error};
+        if ( $e && ( !ref $e || @$e ) ) {
+            print "\n", T('cli.last_sync_error'), "\n";
+            print map { render_msg($_) . "\n" } ref $e ? @$e : ($e);
+        }
+        return 1;
+    },
+    check => sub {
+        # Run all checks locally without contacting Better Stack.
+        my $cfg = BetterStack::WHM::Config::load();
+        my $ctx = {};
+        for my $i ( @{ BetterStack::WHM::Checks::discover_all( $cfg, $ctx ) } ) {
+            my $r    = BetterStack::WHM::Checks::run_instance( $cfg, $i, $ctx );
+            my $info = render( $r->{info} );
+            printf "%-28s %-5s %s%s\n", $i->{id}, $r->{status}, render( $r->{detail} ), length $info ? "  [$info]" : '';
+        }
+        return 1;
+    },
+    test => sub {
+        my $cfg = BetterStack::WHM::Config::load();
+        my ( $pages, $err ) = BetterStack::WHM::API->from_config($cfg)->status_pages;
+        if ($err) { print T( 'cli.conn_failed', $err ), "\n"; return 0 }
+        print T('cli.conn_ok'), "\n";
+        printf "  %-10s %s\n", $_->{id}, $_->{attributes}{company_name} // $_->{attributes}{subdomain} // '' for @$pages;
+        return 1;
+    },
+    cleanup => sub {
+        my $r = BetterStack::WHM::Engine::with_lock(
+            sub {
+                my $cfg  = BetterStack::WHM::Config::load();
+                my $st   = BetterStack::WHM::Config::load_state();
+                my $errs = BetterStack::WHM::Engine::cleanup( $cfg, $st );
+                BetterStack::WHM::Config::save_state($st);
+                return { ok => !@$errs, errors => $errs };
+            },
+            wait => 1,
+        );
+        errors( $r->{errors} );
+        print T('cli.cleaned'), "\n" if $r->{ok};
+        return $r->{ok};
+    },
+);
+
+if ( !$commands{$cmd} ) {
+    print T('cli.usage');
+    exit( $cmd eq 'help' ? 0 : 1 );
+}
+
+exit( $commands{$cmd}->() ? 0 : 1 );

@@ -1,0 +1,2 @@
+# StatusBridge for WHM: runs due checks and reports heartbeats.
+* * * * * root /usr/local/cpanel/3rdparty/bin/perl /opt/betterstack-whm/bin/bswhm run >/dev/null 2>&1

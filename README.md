@@ -154,8 +154,10 @@ own section and heartbeat group, based on its server name.
 
 **Testing a check that is switched off.** A check that is off has a *Test* button: on the
 *Status page* tab for a single check, on the *Checks* tab for a whole check type. It runs the check
-on the server and shows the result right there. Nothing is sent to Better Stack, so it never pings
-a heartbeat or opens an incident. Unsaved changes on that tab are not kept, so save first.
+on the server in the background and shows the result right there, without reloading the page.
+Nothing is sent to Better Stack, so it never pings a heartbeat or opens an incident. (Without
+JavaScript the page reloads and jumps back to the result; unsaved changes on that tab are then
+lost.)
 
 The page only loads local assets (no external fonts, scripts or images). It also works without
 JavaScript and on small screens.
@@ -257,6 +259,7 @@ The internal paths and the Perl namespace use the technical name `betterstack-wh
 | `/usr/local/cpanel/whostmgr/docroot/cgi/betterstack/` | WHM page |
 | `/etc/betterstack-whm/config.json` | Settings and API token (mode 0600, root only) |
 | `/var/lib/betterstack-whm/state.json` | Links to Better Stack objects and latest results (0600) |
+| `/var/lib/betterstack-whm/ssl-dates.json` | Known certificate end dates, so unchanged certificates are not read again (0600) |
 | `/var/log/betterstack-whm.log` | Log (0600) |
 | `/etc/cron.d/betterstack-whm` | Cron job |
 

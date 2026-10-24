@@ -61,6 +61,8 @@ BetterStack::WHM::I18N::add(
     'ui.preview'          => [ 'Testen', 'Test', 'Testen' ],
     'ui.preview_help'     => [ 'Draait deze controle nu alleen op de server. Er gaat niets naar Better Stack, dus er ontstaat geen incident.', 'Runs this check now, on the server only. Nothing is sent to Better Stack, so no incident is created.', 'Führt diese Prüfung jetzt nur auf dem Server aus. Es wird nichts an Better Stack gesendet, also entsteht kein Vorfall.' ],
     'ui.preview_hint'     => [ 'Uitgeschakeld. Testen toont het resultaat hier, zonder heartbeat of incident.', 'Switched off. Test shows the result here, without a heartbeat or incident.', 'Ausgeschaltet. Testen zeigt das Ergebnis hier, ohne Heartbeat oder Vorfall.' ],
+    'ui.preview_busy'     => [ 'Bezig…', 'Running…', 'Läuft…' ],
+    'ui.preview_failed'   => [ 'Testen mislukt. Laad de pagina opnieuw en probeer het nog eens.', 'Test failed. Reload the page and try again.', 'Test fehlgeschlagen. Seite neu laden und erneut versuchen.' ],
     'ui.preview_done'     => [ '%d uitgeschakelde controle(s) getest. Er is niets naar Better Stack gestuurd.', '%d switched-off check(s) tested. Nothing was sent to Better Stack.', '%d ausgeschaltete Prüfung(en) getestet. Es wurde nichts an Better Stack gesendet.' ],
 
     # ---- status words

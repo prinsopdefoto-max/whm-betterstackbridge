@@ -416,7 +416,7 @@ sub render_page {
     my $overall = worst( map { ( $st->{results}{ $_->{id} } || {} )->{status} } @enabled );
     my @serr    = sync_errors();
 
-    my $o = style() . '<div class="bsw bsw-nojs" id="bsw" data-start="' . h($tab) . '">';
+    my $o = style() . '<div class="bsw bsw-nojs" id="bsw" data-start="' . h($tab) . '" data-busy="' . th('ui.preview_busy') . '" data-failed="' . th('ui.preview_failed') . '">';
 
     # ---- header
     my $conn = !$configured ? [ 'none', T('ui.conn_none') ] : @serr ? [ 'warn', T('ui.conn_errors') ] : [ 'ok', T('ui.conn_ok') ];
@@ -585,16 +585,23 @@ sub panel_items {
 
 # ---------------------------------------------------------------- preview
 
+# The test button posts the form; with JavaScript the result is fetched in the
+# background and only the element with id $target is replaced. Without
+# JavaScript the page reloads and jumps back to that element.
 sub preview_button {
-    my ($value) = @_;
-    return '<button class="bsw-btn bsw-btn-sm" name="action" value="' . h($value) . '" title="' . th('ui.preview_help') . '">' . icon('play') . th('ui.preview') . '</button>';
+    my ( $value, $target ) = @_;
+    return sprintf '<button class="bsw-btn bsw-btn-sm" name="action" value="%s" formaction="index.cgi#%s" data-preview="%s" title="%s">%s<span>%s</span></button>', h($value), h($target),
+      h($target), th('ui.preview_help'), icon('play'), th('ui.preview');
 }
+
+sub preview_anchor { my $id = shift; $id =~ s/[^\w-]/_/g; return "bsw-pv-$id" }
 
 # Test result of a switched-off instance, below its name on the status page tab.
 sub preview_line {
     my ($id) = @_;
-    my $r = ( $st->{preview} || {} )->{$id};
-    my $o = '<span class="bsw-preview-line">' . preview_button("preview:$id");
+    my $r      = ( $st->{preview} || {} )->{$id};
+    my $anchor = preview_anchor($id);
+    my $o      = '<span class="bsw-preview-line" id="' . h($anchor) . '">' . preview_button( "preview:$id", $anchor );
     if ($r) {
         my $info = render( $r->{info} );
         $o .= sprintf '<em>%s%s %s</em><time>%s</time>', dot( $r->{status} ), h( status_word( $r->{status} ) ), h( render( $r->{detail} ) ), h( ago( $r->{at} ) );
@@ -608,7 +615,9 @@ sub preview_block {
     my ($type) = @_;
     my $pv = $st->{preview} || {};
     my @ids = sort grep { ( $pv->{$_}{type} // '' ) eq $type } keys %$pv;
-    my $o = '<div class="bsw-preview"><div class="bsw-preview-head"><span class="bsw-muted">' . th('ui.preview_hint') . '</span>' . preview_button("preview_type:$type") . '</div>';
+    my $anchor = preview_anchor("type-$type");
+    my $o = '<div class="bsw-preview" id="' . h($anchor) . '"><div class="bsw-preview-head"><span class="bsw-muted">' . th('ui.preview_hint') . '</span>'
+      . preview_button( "preview_type:$type", $anchor ) . '</div>';
     if (@ids) {
         $o .= '<ul class="bsw-members">';
         for my $id (@ids) {
@@ -798,6 +807,44 @@ sub script {
     if (history.replaceState) history.replaceState(null, '', '#' + t);
   });
   if (location.hash.length > 1) show(location.hash.slice(1)); else show(root.getAttribute('data-start'));
+
+  // Test buttons of switched-off checks: run the test in the background and
+  // replace only its result, so the page does not reload or scroll away.
+  root.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-preview]');
+    if (!b || !root.contains(b) || !window.fetch || !window.DOMParser) return;
+    e.preventDefault();
+    if (b.disabled) return;
+    var id = b.getAttribute('data-preview'), f = b.form, label = b.querySelector('span'), text = label.textContent;
+    var body = new URLSearchParams();
+    body.append('csrf', f.querySelector('input[name=csrf]').value);
+    body.append('tab', f.querySelector('input[name=tab]').value);
+    body.append('action', b.value);
+    b.disabled = true;
+    b.classList.add('bsw-busy');
+    label.textContent = root.getAttribute('data-busy');
+    var fail = function (msg) {
+      b.disabled = false;
+      b.classList.remove('bsw-busy');
+      label.textContent = text;
+      var old = document.getElementById(id);
+      if (!old) return;
+      var p = old.querySelector('.bsw-preview-err') || old.appendChild(document.createElement('em'));
+      p.className = 'bsw-preview-err';
+      p.textContent = msg || root.getAttribute('data-failed');
+    };
+    fetch(f.getAttribute('action'), { method: 'POST', body: body, credentials: 'same-origin' })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var fresh = doc.getElementById(id), old = document.getElementById(id);
+        var err = doc.querySelector('#bsw .bsw-flash.bsw-f-error');
+        if (!fresh || !old) return fail(err && err.textContent.trim());
+        old.replaceWith(document.importNode(fresh, true));
+        if (err) fail(err.textContent.trim());
+      })
+      .catch(function () { fail(); });
+  });
   root.querySelectorAll('.bsw-danger').forEach(function (f) {
     f.addEventListener('submit', function (e) { if (!window.confirm(f.querySelector('button').textContent.trim() + '?')) e.preventDefault(); });
   });
@@ -974,6 +1021,10 @@ sub style {
 .bsw-preview-line em{font-style:normal;display:inline-flex;gap:6px;align-items:center}
 .bsw-preview-line time{color:var(--mu2)}
 .bsw-preview-line .bsw-m-info{flex-basis:100%;margin-top:0}
+.bsw .bsw-btn.bsw-busy{cursor:progress;opacity:.75}
+.bsw .bsw-btn.bsw-busy .bsw-ic{animation:bsw-pulse 1s ease-in-out infinite}
+@keyframes bsw-pulse{50%{opacity:.2}}
+.bsw-preview-err{display:block;flex-basis:100%;font-style:normal;color:var(--fail-t);font-size:12px;margin-top:4px}
 .bsw-check-head{display:flex;gap:12px;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
 .bsw-check-head h3{font-size:14px;margin-top:3px}
 .bsw-check>p{margin-bottom:14px;font-size:12.5px}

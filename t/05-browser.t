@@ -29,6 +29,12 @@ do '$FindBin::Bin/../cgi/index.cgi'; die \$@ if \$@;
 PL
 close $w;
 
+# A switched-off check type, to test the "Test" button against.
+system 'mkdir', '-p', "$dir/etc";
+open my $cf, '>', "$dir/etc/config.json" or die;
+print $cf '{"config_version":3,"checks":{"rbl":{"enabled":0}}}';
+close $cf;
+
 my $html = do { local %ENV = ( %ENV, REQUEST_METHOD => 'GET', REMOTE_USER => 'root', HTTP_ACCEPT_LANGUAGE => 'nl' ); `$^X $dir/wrap.pl` };
 $html =~ s/\A.*?\r?\n\r?\n//s;    # strip CGI headers
 open my $fh, '>', "$dir/page.html" or die;
@@ -50,6 +56,16 @@ is( $r->{still_settings}, 'settings' );
 ok( $r->{check_switch}, 'switch on the checks tab toggles' );
 ok( $r->{item_switch},  'switch on the status page tab toggles' );
 is( $r->{final_tab}, 'items' );
+is_deeply( $r->{errors}, [], 'no JavaScript errors' );
+
+$out = `$node $FindBin::Bin/browser/preview.js $dir/page.html $^X $dir/wrap.pl`;
+$r   = eval { JSON::PP->new->decode($out) } || { fatal => $out };
+ok( !$r->{fatal}, 'browser run (test button)' ) or diag $r->{fatal};
+like( $r->{busy} // '', qr/^Bezig/, 'test button shows it is busy' );
+like( $r->{result} // '', qr/E-mailreputatie|Blacklist/i, 'result appears in place' );
+ok( $r->{no_reload}, 'page is not reloaded' );
+is( $r->{tab}, 'checks', 'stays on the same tab' );
+ok( $r->{button_ready}, 'button usable again' );
 is_deeply( $r->{errors}, [], 'no JavaScript errors' );
 
 done_testing;

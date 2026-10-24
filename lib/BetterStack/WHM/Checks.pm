@@ -14,7 +14,7 @@ use utf8;
 
 use Socket qw(inet_aton);
 use Time::Local qw(timegm);
-use BetterStack::WHM::Util qw(run_cmd json_decode);
+use BetterStack::WHM::Util qw(run_cmd json_decode var_dir read_json write_json);
 use BetterStack::WHM::I18N qw(tl render_msg);
 
 # A failing check dies with a message: _die( 'err.read', 'loadavg' ).
@@ -25,6 +25,7 @@ our $PROC   = '/proc';
 our $CPANEL = '/usr/local/cpanel';
 our $VARCP  = '/var/cpanel';
 our $ETC    = '/etc';
+our $SSL_CACHE;    # file with known certificate end dates; default in var_dir()
 
 # Absolute paths of the system tools we call; nothing is looked up via $PATH.
 sub _bin {
@@ -537,8 +538,20 @@ sub run_ssl {
     return { status => 'ok', detail => [ ['r.ssl_none'] ], info => \@skip_info } unless @files;
     my $now = time;
     my ( @crit, @warn, $soonest, $soonest_name );
+    # End dates are remembered per file (path, size, mtime, inode), so only new
+    # or renewed certificates need an openssl call. That keeps the check fast
+    # on servers with hundreds of certificates.
+    my $cache_file = $SSL_CACHE // var_dir() . '/ssl-dates.json';
+    my $cache      = eval { read_json($cache_file) } || {};
+    my ( %fresh, $changed );
     for my $f (@files) {
-        my $end = cert_end_epoch($f) // next;
+        my @s   = stat $f or next;
+        my $sig = join ':', @s[ 1, 7, 9 ];
+        my $end;
+        if   ( ref $cache->{$f} eq 'ARRAY' && ( $cache->{$f}[0] // '' ) eq $sig ) { $end = $cache->{$f}[1] }
+        else                                                                       { $end = cert_end_epoch($f); $changed = 1 }
+        next unless defined $end;
+        $fresh{$f} = [ $sig, $end ];
         my ($name) = $f =~ m{apache_tls/([^/]+)/} ? $1 : ('cpanel-service');
         next if $name =~ /^\*/;
         my $days = int( ( $end - $now ) / 86400 );
@@ -546,6 +559,7 @@ sub run_ssl {
         push @crit, "$name ($days d)" if $days <= $ts->{crit_days};
         push @warn, "$name ($days d)" if $days > $ts->{crit_days} && $days <= $ts->{warn_days};
     }
+    eval { write_json( $cache_file, \%fresh ) } if $changed || keys %$cache != keys %fresh;
     my $n = @files;
     my $status = @crit ? 'fail' : @warn ? 'warn' : 'ok';
     my $detail = [ [ 'r.ssl_count', $n ] ];

@@ -9,10 +9,15 @@ All notable changes to this project are documented here. The format follows
 ### Added
 - **Test switched-off checks.** A *Test* button in WHM runs a check that is switched off (on the
   *Status page* tab for a single check, on the *Checks* tab for a whole check type) and shows its
-  result there. Nothing is sent to Better Stack, so it never pings a heartbeat or opens an
-  incident. On the command line: `bswhm check --all`.
+  result there, without reloading the page. Nothing is sent to Better Stack, so it never pings a
+  heartbeat or opens an incident. On the command line: `bswhm check --all`.
 - **SSL certificates: exclude suspended accounts.** A new option on the SSL check leaves out the
   certificates of suspended cPanel accounts. The number skipped is shown in WHM only.
+
+### Changed
+- **Faster SSL check.** Certificate end dates are remembered per file, so `openssl` only runs for
+  new or renewed certificates. On servers with many certificates the check (and its test in WHM)
+  is much faster after the first run.
 
 ## [1.0.0] - 2026-10-24
 

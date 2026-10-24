@@ -114,7 +114,7 @@ subtest 'WHM page languages' => sub {
     like( page(), qr/Settings/, 'English for a new install without browser language' );
     for my $p ( page( HTTP_ACCEPT_LANGUAGE => 'en' ), page( HTTP_ACCEPT_LANGUAGE => 'de' ) ) {
         ( my $text = $p ) =~ s{<(script|style)\b.*?</\1>}{}gs;
-        my @keys = grep { index( $text, $_ ) >= 0 } grep { /^(?:ui|cli|r|e|err|param|type|typedesc)\./ } keys %S;
+        my @keys = grep { index( $text, $_ ) >= 0 } grep { /^(?:ui|cli|upd|r|e|err|param|type|typedesc)\./ } keys %S;
         is_deeply( \@keys, [], 'no untranslated keys on the page' );
         unlike( $p, qr/(?:Use of uninitialized|line \d+\.)/, 'no Perl warnings' );
     }

@@ -149,7 +149,7 @@ own section and heartbeat group, based on its server name.
 | **Overview** | System status, counters, and a card per heartbeat with its checks, private details (WHM only) and the text currently shown on the status page. |
 | **Status page** | Per category: which checks are on, their public names, the bundle name, and which checks get their own heartbeat. |
 | **Checks** | Interval, thresholds and published details for each check. |
-| **Settings** | Connection, status page, layout, languages, alert channels and behaviour, plus a danger zone that removes everything from Better Stack. |
+| **Settings** | Connection, status page, layout, languages, alert channels and behaviour, update check, plus a danger zone that removes everything from Better Stack. |
 | **Log** | Recent log entries, newest first. |
 
 **Testing a check that is switched off.** A check that is off has a *Test* button: on the
@@ -228,12 +228,21 @@ bswhm check        run all checks locally, without contacting Better Stack
 bswhm check --all  the same, including checks that are switched off
 bswhm status       latest results and link state
 bswhm test         test the API token and list status pages
+bswhm update-check look for a new version in the git clone it was installed from
 bswhm sync         synchronise now
 bswhm run --force  run and report all checks now
 bswhm cleanup      remove everything this plugin created in Better Stack
 ```
 
 ## Updating and uninstalling
+
+**Update check.** Once a day the plugin runs `git fetch` in the clone it was installed from and
+compares the result with the installed commit. When there is something new, WHM shows a notice and
+lists the new changes under **Settings → Updates**, together with the command to update. Use
+*Check now* to check right away. The check never changes the clone and never installs anything:
+you update yourself, from a terminal, after reviewing the changes. It uses the clone's own remote
+and credentials, so it works for a private repository as long as `git pull` works there without
+asking for a password (for example with a stored token or a deploy key).
 
 ```bash
 cd /root/whm-betterstackbridge
@@ -261,7 +270,9 @@ The internal paths and the Perl namespace use the technical name `betterstack-wh
 | `/var/lib/betterstack-whm/state.json` | Links to Better Stack objects and latest results (0600) |
 | `/var/lib/betterstack-whm/ssl-dates.json` | Known certificate end dates, so unchanged certificates are not read again (0600) |
 | `/var/log/betterstack-whm.log` | Log (0600) |
-| `/etc/cron.d/betterstack-whm` | Cron job |
+| `/var/lib/betterstack-whm/install.json` | The clone and commit the plugin was installed from (0600) |
+| `/var/lib/betterstack-whm/update.json` | Result of the latest update check (0600) |
+| `/etc/cron.d/betterstack-whm` | Cron jobs (checks every minute, update check once a day) |
 
 ## Troubleshooting
 

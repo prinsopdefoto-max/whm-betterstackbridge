@@ -51,6 +51,13 @@ version.
     `/var/cpanel/ssl`.
   - Nothing in account home directories is read or executed.
   - Large logs are read from the end only.
+- **Update check.**
+  - Only `git fetch` runs in the clone the plugin was installed from; nothing is merged, checked out
+    or installed. Updating stays a manual step in a terminal.
+  - Git only runs when the clone, its `.git` directory and `.git/config` are owned by root and not
+    writable by others, with hooks and `fsmonitor` switched off and without prompting for
+    credentials.
+  - Commit messages from the repository are HTML-escaped like all other output.
 - **Installer.**
   - Refuses a source tree with files that are not owned by root or that are group- or
     world-writable.

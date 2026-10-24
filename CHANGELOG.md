@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format follows
   *Status page* tab for a single check, on the *Checks* tab for a whole check type) and shows its
   result there, without reloading the page. Nothing is sent to Better Stack, so it never pings a
   heartbeat or opens an incident. On the command line: `bswhm check --all`.
+- **Update check.** Once a day (and on request in WHM) the plugin looks for new commits in the git
+  clone it was installed from. WHM shows a notice, the list of new changes and the command to
+  update. Nothing is installed automatically. On the command line: `bswhm update-check`.
 - **SSL certificates: exclude suspended accounts.** A new option on the SSL check leaves out the
   certificates of suspended cPanel accounts. The number skipped is shown in WHM only.
 

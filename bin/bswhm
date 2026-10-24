@@ -13,6 +13,7 @@ use BetterStack::WHM::Checks ();
 use BetterStack::WHM::API ();
 use BetterStack::WHM::I18N qw(T render render_msg);
 use BetterStack::WHM::UIStrings ();
+use BetterStack::WHM::Update ();
 
 binmode STDOUT, ':encoding(UTF-8)';
 
@@ -77,6 +78,12 @@ my %commands = (
         }
         return 1;
     },
+    'update-check' => sub {
+        # Called once a day from cron; WHM shows the result.
+        my $s = BetterStack::WHM::Update::check();
+        print_update_status($s);
+        return $s->{state} ne 'error';
+    },
     test => sub {
         my $cfg = BetterStack::WHM::Config::load();
         my ( $pages, $err ) = BetterStack::WHM::API->from_config($cfg)->status_pages;
@@ -101,6 +108,17 @@ my %commands = (
         return $r->{ok};
     },
 );
+
+sub print_update_status {
+    my ($s) = @_;
+    if    ( $s->{state} eq 'current' )   { print T('upd.current'), "\n" }
+    elsif ( $s->{state} eq 'available' ) {
+        print T( 'upd.available', $s->{count} // 1 ), "\n";
+        print "  $_->[0]  $_->[2]\n" for @{ $s->{commits} || [] };
+        print "\n", T('upd.how'), "\n  ", BetterStack::WHM::Update::command( BetterStack::WHM::Update::install_info() ), "\n";
+    }
+    else { print render_msg( $s->{reason} ), "\n" }
+}
 
 if ( !$commands{$cmd} ) {
     print T('cli.usage');

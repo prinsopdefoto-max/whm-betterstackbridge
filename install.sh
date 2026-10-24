@@ -47,6 +47,16 @@ for f in "$PREFIX"/lib/BetterStack/WHM/*.pm "$PREFIX/bin/bswhm"; do
     "$PERL" -I"$PREFIX/lib" -c "$f" >/dev/null 2>&1 || { echo "Syntax error in $f" >&2; "$PERL" -I"$PREFIX/lib" -c "$f"; exit 1; }
 done
 
+# Remember the clone and commit this install came from, for the update check in WHM.
+COMMIT=""
+UPSTREAM=""
+if [ -d "$SRC/.git" ] && command -v git >/dev/null 2>&1; then
+    COMMIT="$(git -C "$SRC" rev-parse HEAD 2>/dev/null || true)"
+    UPSTREAM="$(git -C "$SRC" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+fi
+SRC="$SRC" COMMIT="$COMMIT" UPSTREAM="$UPSTREAM" "$PERL" -I"$PREFIX/lib" -MBetterStack::WHM::Util=write_json \
+    -e 'write_json( "/var/lib/betterstack-whm/install.json", { source => $ENV{SRC}, commit => $ENV{COMMIT}, upstream => $ENV{UPSTREAM}, at => time } )'
+
 echo "Synchronising with Better Stack (also removes duplicates) ..."
 "$PERL" "$PREFIX/bin/bswhm" sync || true
 

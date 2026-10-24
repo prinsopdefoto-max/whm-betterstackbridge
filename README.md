@@ -75,7 +75,7 @@ When something fails, the failing part is listed first (for example `✖ Web ser
 | Database reachable | `mysqladmin status`: connections, queries/s | Not reachable | 60 s |
 | Mail queue | `exim -bpc` | ≥ 2500 messages (warning ≥ 500) | 300 s |
 | Blacklist check | Main IP (plus optional extra IPs) against Spamhaus ZEN, SpamCop, Barracuda and PSBL | Listed | 1800 s |
-| SSL certificates | Installed and AutoSSL certificates, plus the cPanel service certificate | Expires within 3 days (warning within 14) | 3600 s |
+| SSL certificates | Installed and AutoSSL certificates, plus the cPanel service certificate. Optionally without suspended accounts | Expires within 3 days (warning within 14) | 3600 s |
 | cPanel backups | Result and age of the latest backup log | Failed or older than 30 hours | 3600 s |
 | Software RAID | `/proc/mdstat` | Array degraded | 300 s |
 
@@ -84,6 +84,10 @@ changed in WHM.
 
 **Warnings and outages.** A warning shows up in WHM and in the item text (⚠), but the item stays
 green. Only an outage creates an incident in Better Stack.
+
+**Suspended accounts.** Turn on *Exclude suspended accounts* in the SSL check to leave out the
+certificates of suspended cPanel accounts (`/var/cpanel/suspended`, matched via
+`/etc/userdomains`). It is off by default. WHM shows how many certificates were skipped.
 
 **Off by default.** Internal services such as `lfd`, `rsyslogd`, `p0f`, `queueprocd`, IP aliases,
 LMTP/POP3, `nscd` and SSH are discovered but switched off by default, and so are `/boot` partitions.
@@ -147,6 +151,11 @@ own section and heartbeat group, based on its server name.
 | **Checks** | Interval, thresholds and published details for each check. |
 | **Settings** | Connection, status page, layout, languages, alert channels and behaviour, plus a danger zone that removes everything from Better Stack. |
 | **Log** | Recent log entries, newest first. |
+
+**Testing a check that is switched off.** A check that is off has a *Test* button: on the
+*Status page* tab for a single check, on the *Checks* tab for a whole check type. It runs the check
+on the server and shows the result right there. Nothing is sent to Better Stack, so it never pings
+a heartbeat or opens an incident. Unsaved changes on that tab are not kept, so save first.
 
 The page only loads local assets (no external fonts, scripts or images). It also works without
 JavaScript and on small screens.
@@ -214,6 +223,7 @@ The state file is written with `fsync` and a backup copy, so it survives a hard 
 
 ```
 bswhm check        run all checks locally, without contacting Better Stack
+bswhm check --all  the same, including checks that are switched off
 bswhm status       latest results and link state
 bswhm test         test the API token and list status pages
 bswhm sync         synchronise now

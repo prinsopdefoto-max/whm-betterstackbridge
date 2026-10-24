@@ -24,6 +24,7 @@ sub _die { die { msg => [@_] } }
 our $PROC   = '/proc';
 our $CPANEL = '/usr/local/cpanel';
 our $VARCP  = '/var/cpanel';
+our $ETC    = '/etc';
 
 # Absolute paths of the system tools we call; nothing is looked up via $PATH.
 sub _bin {
@@ -98,7 +99,7 @@ our @TYPE_ORDER = qw(server service load memory disk mysql mailqueue rbl ssl bac
     },
     ssl => {
         label => 'type.ssl', category => 'security', interval => 3600, enabled => 1,
-        params => { warn_days => 14, crit_days => 3 },
+        params => { warn_days => 14, crit_days => 3, skip_suspended => 0 },
         discover => sub { [ { id => 'ssl', name => ['name.ssl'] } ] },
         run      => \&run_ssl,
     },
@@ -115,6 +116,9 @@ our @TYPE_ORDER = qw(server service load memory disk mysql mailqueue rbl ssl bac
         run      => \&run_raid,
     },
 );
+
+# On/off parameters (a switch in WHM instead of a number field).
+our %BOOL_PARAMS = map { $_ => 1 } qw(partial_is_fail skip_suspended);
 
 sub category_label {
     my ( $cat, $lang ) = @_;
@@ -148,16 +152,18 @@ sub type_settings {
 }
 
 # All instances for enabled types, honouring per-instance overrides.
-# Returns arrayref of { id, type, category, name, name_msg, public_name, interval, enabled }.
+# Returns arrayref of { id, type, category, name, name_msg, public_name, interval, enabled, type_enabled }.
 # Names are rendered in the language of the public status page.
+# Option all_types: also discover the instances of disabled types (with enabled => 0),
+# so they can be tested in WHM without switching them on.
 sub discover_all {
-    my ( $config, $ctx ) = @_;
+    my ( $config, $ctx, %opt ) = @_;
     $ctx ||= {};
     my $lang = public_lang($config);
     my @out;
     for my $type (@TYPE_ORDER) {
         my $ts = type_settings( $config, $type );
-        next unless $ts->{enabled};
+        next unless $ts->{enabled} || $opt{all_types};
         my $list = eval { $TYPES{$type}{discover}->( $ctx, $ts ) } || [];
         for my $inst (@$list) {
             my $ov = ( $config->{instances} || {} )->{ $inst->{id} } || {};
@@ -170,7 +176,8 @@ sub discover_all {
                 category    => $TYPES{$type}{category},
                 public_name => ( defined $ov->{public_name} && length $ov->{public_name} ) ? $ov->{public_name} : render_msg( $msg, $lang ),
                 interval    => $ts->{interval},
-                enabled     => $ov->{enabled} // $inst->{default_enabled} // 1,
+                enabled     => $ts->{enabled} ? $ov->{enabled} // $inst->{default_enabled} // 1 : 0,
+                type_enabled => $ts->{enabled} ? 1 : 0,
             };
         }
     }
@@ -504,10 +511,30 @@ sub cert_end_epoch {
     return $code == 0 ? parse_openssl_date($out) : undef;
 }
 
+# Domains of suspended cPanel accounts: /var/cpanel/suspended/<user> marks a
+# suspended account, /etc/userdomains maps every domain to its owner.
+sub suspended_domains {
+    my %users = map { m{/([a-z0-9_-]+)\z} ? ( $1 => 1 ) : () } grep { -f } glob("$VARCP/suspended/*");
+    return {} unless %users;
+    my %domains;
+    for ( split /\n/, _read("$ETC/userdomains") // '' ) {
+        $domains{ lc $1 } = 1 if /^([^\s:]+):\s*(\S+)/ && $users{$2};
+    }
+    return \%domains;
+}
+
 sub run_ssl {
     my ( $inst, $ts ) = @_;
     my @files = grep { -f && !-l } glob("$VARCP/ssl/apache_tls/*/combined"), "$VARCP/ssl/cpanel/mycpanel.pem";
-    return { status => 'ok', detail => [ ['r.ssl_none'] ] } unless @files;
+    my $skipped = 0;
+    if ( $ts->{skip_suspended} ) {
+        my $susp = suspended_domains();
+        my $n    = @files;
+        @files   = grep { !( m{apache_tls/([^/]+)/} && $susp->{ lc $1 } ) } @files;
+        $skipped = $n - @files;
+    }
+    my @skip_info = $skipped ? ( [ 'r.ssl_skipped', $skipped ] ) : ();
+    return { status => 'ok', detail => [ ['r.ssl_none'] ], info => \@skip_info } unless @files;
     my $now = time;
     my ( @crit, @warn, $soonest, $soonest_name );
     for my $f (@files) {
@@ -526,7 +553,7 @@ sub run_ssl {
     push @$detail, [ 'r.ssl_soon', @crit + @warn ] if @crit || @warn;
     my $info = [ ( @crit ? [ 'r.ssl_crit', join( ', ', @crit ) ] : () ), ( @warn ? [ 'r.ssl_warn', join( ', ', @warn ) ] : () ) ];
     $info = [ [ 'r.ssl_first', $soonest_name ] ] if !@$info && $soonest_name;
-    return { status => $status, detail => $detail, info => $info };
+    return { status => $status, detail => $detail, info => [ @$info, @skip_info ] };
 }
 
 # ---------------------------------------------------------------- backup

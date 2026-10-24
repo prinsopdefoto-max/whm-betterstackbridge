@@ -156,6 +156,31 @@ subtest 'type settings and overrides' => sub {
     ok( !$all{rbl}, 'disabled type not discovered' );
     is( $all{load}{public_name}, 'CPU' );
     is( $all{memory}{enabled}, 0 );
+    %all = map { $_->{id} => $_ } @{ BetterStack::WHM::Checks::discover_all( $cfg, { servicestatus => [], df => [] }, all_types => 1 ) };
+    ok( $all{rbl} && !$all{rbl}{enabled} && !$all{rbl}{type_enabled}, 'all_types: disabled type discovered, but off' );
+    ok( $all{load}{enabled} && $all{load}{type_enabled} );
+};
+
+subtest 'ssl: suspended accounts can be left out' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    local $BetterStack::WHM::Checks::VARCP = "$dir/var";
+    local $BetterStack::WHM::Checks::ETC   = "$dir/etc";
+    system 'mkdir', '-p', "$dir/var/suspended", "$dir/etc", map { "$dir/var/ssl/apache_tls/$_" } qw(good.nl bad.nl sub.bad.nl);
+    my $touch = sub { open my $fh, '>', $_[0] or die; print $fh $_[1] // ''; close $fh };
+    $touch->("$dir/var/ssl/apache_tls/$_/combined") for qw(good.nl bad.nl sub.bad.nl);
+    $touch->("$dir/var/suspended/baduser");
+    $touch->("$dir/etc/userdomains", "good.nl: gooduser\nbad.nl: baduser\nsub.bad.nl: baduser\n*: nobody\n");
+    no warnings 'redefine';
+    local *BetterStack::WHM::Checks::cert_end_epoch = sub { time + ( $_[0] =~ /good/ ? 60 : 1 ) * 86400 + 3600 };
+    my $ts = { warn_days => 14, crit_days => 3 };
+    my $r = BetterStack::WHM::Checks::run_ssl( {}, $ts );
+    is( $r->{status}, 'fail', 'expiring certificate of a suspended account counts by default' );
+    $r = BetterStack::WHM::Checks::run_ssl( {}, { %$ts, skip_suspended => 1 } );
+    is( $r->{status}, 'ok', 'left out when the option is on' );
+    is( R( $r->{detail} ), RM( [ 'r.ssl_count', 1 ] ) . ', ' . RM( [ 'r.ssl_next', 60 ] ) );
+    like( R( $r->{info} ), qr/^.*\b2\b.*/, 'skipped count shown in WHM' );
+    unlink "$dir/var/suspended/baduser";
+    is( BetterStack::WHM::Checks::run_ssl( {}, { %$ts, skip_suspended => 1 } )->{status}, 'fail', 'unsuspended accounts count again' );
 };
 
 done_testing;

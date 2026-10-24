@@ -256,6 +256,27 @@ $cfg->{section_mode} = 'single';
 BetterStack::WHM::Config::save($cfg);
 BetterStack::WHM::Engine::run();
 
+# ---- testing switched-off checks: shown in WHM, never sent to Better Stack
+{
+    local $BetterStack::WHM::Checks::TYPES{fakeoff} = {
+        label => 'fake', category => 'mail', interval => 300, enabled => 0, params => {},
+        discover => sub { [ { id => 'fakeoff', name => 'Uit' } ] },
+        run      => sub { { status => 'fail', detail => 'kapot' } },
+    };
+    local @BetterStack::WHM::Checks::TYPE_ORDER = ( @BetterStack::WHM::Checks::TYPE_ORDER, 'fakeoff' );
+    my $before = BetterStack::WHM::Config::load_state();
+    @calls = (); @pings = ();
+    my $r = BetterStack::WHM::Engine::preview( type => 'fakeoff' );
+    is( $r->{ran}, 1, 'switched-off check type tested' );
+    $r = BetterStack::WHM::Engine::preview( only => 'load' );
+    is( $r->{ran}, 0, 'checks that are on are not previewed' );
+    is_deeply( [ @calls, @pings ], [], 'nothing sent to Better Stack' );
+    $st = BetterStack::WHM::Config::load_state();
+    is( $st->{preview}{fakeoff}{status}, 'fail' );
+    ok( !$st->{results}{fakeoff}, 'live results untouched' );
+    is_deeply( $st->{items}, $before->{items}, 'heartbeats untouched' );
+}
+
 # ---- cleanup
 $st = BetterStack::WHM::Config::load_state();
 my $errs = BetterStack::WHM::Engine::cleanup( $cfg, $st );

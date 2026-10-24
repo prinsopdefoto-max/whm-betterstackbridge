@@ -128,7 +128,7 @@ sub handle_action {
             $c->{publish_details} = $f->{"chk_${type}_publish"} ? 1 : 0;
             $c->{interval}        = int num( $f->{"chk_${type}_interval"}, $def->{interval}, 60, 86400 );
             for my $p ( keys %{ $def->{params} } ) {
-                if ( $p eq 'partial_is_fail' ) { $c->{$p} = $f->{"chk_${type}_$p"} ? 1 : 0; next }
+                if ( $BetterStack::WHM::Checks::BOOL_PARAMS{$p} ) { $c->{$p} = $f->{"chk_${type}_$p"} ? 1 : 0; next }
                 my $v = $f->{"chk_${type}_$p"};
                 next unless defined $v;
                 if ( $def->{params}{$p} =~ /^[\d.]+$/ ) {
@@ -167,6 +167,13 @@ sub handle_action {
         BetterStack::WHM::Config::save($cfg);
         push @messages, [ 'success', T('ui.saved_items') ];
         sync_now();
+    }
+    elsif ( $action =~ /^preview(_type)?:(.{1,300})\z/s ) {
+        # Test checks that are switched off; nothing is reported to Better Stack.
+        my ( $by_type, $what ) = ( $1, $2 );
+        die "invalid check\n" if $by_type && !$BetterStack::WHM::Checks::TYPES{$what};
+        my $r = BetterStack::WHM::Engine::preview( $by_type ? ( type => $what ) : ( only => $what ) );
+        report( $r, T( 'ui.preview_done', $r->{ran} // 0 ) );
     }
     elsif ( $action eq 'run' ) {
         my $r = BetterStack::WHM::Engine::run( force => 1 );
@@ -559,12 +566,13 @@ sub panel_items {
         for my $inst (@members) {
             my $ov = $cfg->{instances}{ $inst->{id} } || {};
             my $r  = $st->{results}{ $inst->{id} } || {};
+            my $pv = $inst->{enabled} ? '' : preview_line( $inst->{id} );
             $o .= sprintf '<div class="bsw-row%s"><span>%s<input type="hidden" name="item_id_%d" value="%s"></span>'
-              . '<span class="bsw-row-name">%s<span><strong>%s</strong><code>%s</code></span></span>'
+              . '<span class="bsw-row-name">%s<span><strong>%s</strong><code>%s</code>%s</span></span>'
               . '<span><input type="text" name="item_name_%d" value="%s" placeholder="%s" maxlength="120" aria-label="%s"></span>'
               . '<span>%s</span></div>',
               $inst->{enabled} ? '' : ' bsw-row-off', switch( "item_enabled_$i", $inst->{enabled}, '', small => 1 ), $i, h( $inst->{id} ),
-              dot( $inst->{enabled} ? $r->{status} : 'off' ), h( render_msg( $inst->{name_msg} ) ), h( $inst->{id} ),
+              dot( $inst->{enabled} ? $r->{status} : 'off' ), h( render_msg( $inst->{name_msg} ) ), h( $inst->{id} ), $pv,
               $i, h( $ov->{public_name} // '' ), h( $inst->{name} ), th('ui.col_public'),
               switch( "item_own_$i", $ov->{own}, '', small => 1 );
             $i++;
@@ -573,6 +581,46 @@ sub panel_items {
     }
     $o .= savebar( T( 'ui.uses_heartbeats', scalar @$units ), T('ui.save_items') ) . '</form></section>';
     return $o;
+}
+
+# ---------------------------------------------------------------- preview
+
+sub preview_button {
+    my ($value) = @_;
+    return '<button class="bsw-btn bsw-btn-sm" name="action" value="' . h($value) . '" title="' . th('ui.preview_help') . '">' . icon('play') . th('ui.preview') . '</button>';
+}
+
+# Test result of a switched-off instance, below its name on the status page tab.
+sub preview_line {
+    my ($id) = @_;
+    my $r = ( $st->{preview} || {} )->{$id};
+    my $o = '<span class="bsw-preview-line">' . preview_button("preview:$id");
+    if ($r) {
+        my $info = render( $r->{info} );
+        $o .= sprintf '<em>%s%s %s</em><time>%s</time>', dot( $r->{status} ), h( status_word( $r->{status} ) ), h( render( $r->{detail} ) ), h( ago( $r->{at} ) );
+        $o .= '<em class="bsw-m-info">' . icon('lock') . h($info) . '</em>' if length $info;
+    }
+    return $o . '</span>';
+}
+
+# Test results of a switched-off check type, at the bottom of its card on the checks tab.
+sub preview_block {
+    my ($type) = @_;
+    my $pv = $st->{preview} || {};
+    my @ids = sort grep { ( $pv->{$_}{type} // '' ) eq $type } keys %$pv;
+    my $o = '<div class="bsw-preview"><div class="bsw-preview-head"><span class="bsw-muted">' . th('ui.preview_hint') . '</span>' . preview_button("preview_type:$type") . '</div>';
+    if (@ids) {
+        $o .= '<ul class="bsw-members">';
+        for my $id (@ids) {
+            my $r    = $pv->{$id};
+            my $info = render( $r->{info} );
+            $o .= sprintf '<li>%s<div class="bsw-m-body"><div class="bsw-m-name">%s</div><div class="bsw-m-detail">%s</div>%s</div><time class="bsw-num">%s</time></li>',
+              dot( $r->{status} ), h( render_msg( $r->{name_msg} // $id ) ), h( render( $r->{detail} ) || T('ui.no_data') ),
+              length $info ? '<div class="bsw-m-info" title="' . th('ui.private') . '">' . icon('lock') . h($info) . '</div>' : '', h( ago( $r->{at} ) );
+        }
+        $o .= '</ul>';
+    }
+    return $o . '</div>';
 }
 
 sub savebar {
@@ -585,7 +633,7 @@ sub savebar {
 sub panel_checks {
     my $o = panel_open( 'checks', T('ui.tab_checks'), T('ui.checks_intro') );
     $o .= form_open( 'save_checks', 'checks' ) . '<div class="bsw-grid">';
-    my @porder = qw(warn_per_cpu crit_per_cpu warn_pct crit_pct inode_warn_pct inode_crit_pct warn crit warn_days crit_days max_age_hours partial_is_fail lists extra_ips);
+    my @porder = qw(warn_per_cpu crit_per_cpu warn_pct crit_pct inode_warn_pct inode_crit_pct warn crit warn_days crit_days skip_suspended max_age_hours partial_is_fail lists extra_ips);
     my %prank  = map { $porder[$_] => $_ } 0 .. $#porder;
     for my $type (@BetterStack::WHM::Checks::TYPE_ORDER) {
         my $def = $BetterStack::WHM::Checks::TYPES{$type};
@@ -596,7 +644,7 @@ sub panel_checks {
         $o .= sprintf '<label class="bsw-field"><span>%s</span><div class="bsw-unit-input"><input type="number" min="60" step="60" name="chk_%s_interval" value="%d"><em>%s</em></div></label>',
           th('ui.interval'), $type, $ts->{interval}, th('ui.seconds');
         for my $p ( sort { ( $prank{$a} // 99 ) <=> ( $prank{$b} // 99 ) } keys %{ $def->{params} } ) {
-            if ( $p eq 'partial_is_fail' ) {
+            if ( $BetterStack::WHM::Checks::BOOL_PARAMS{$p} ) {
                 $o .= '<div class="bsw-field bsw-wide">' . switch( "chk_${type}_$p", $ts->{$p}, T("param.$p"), small => 1 ) . '</div>';
                 next;
             }
@@ -605,7 +653,9 @@ sub panel_checks {
               th("param.$p"), $wide ? 'text' : 'number', $type, $p, h( $ts->{$p} ), $wide ? '' : ' step="any" min="0"';
         }
         $o .= '<div class="bsw-field bsw-wide">' . switch( "chk_${type}_publish", $ts->{publish_details}, T('ui.publish_details'), small => 1 ) . '</div>';
-        $o .= '</div></article>';
+        $o .= '</div>';
+        $o .= preview_block($type) unless $ts->{enabled};
+        $o .= '</article>';
     }
     $o .= '</div>' . savebar( T('ui.checks_note'), T('ui.save_checks') ) . '</form></section>';
     return $o;
@@ -911,12 +961,19 @@ sub style {
 .bsw-row-name strong{font-weight:500}
 .bsw-row-name span{display:flex;flex-direction:column;min-width:0}
 .bsw-row-name code{font-size:11px;color:var(--mu2);background:none;padding:0;border:0;overflow:hidden;text-overflow:ellipsis}
-.bsw-row-off .bsw-row-name,.bsw-row-off input[type=text]{opacity:.45}
+.bsw-row-off .bsw-row-name>.bsw-dot,.bsw-row-off .bsw-row-name strong,.bsw-row-off .bsw-row-name code,.bsw-row-off input[type=text]{opacity:.45}
 
 /* checks */
 .bsw-grid{columns:3 360px;column-gap:16px}
 .bsw-grid>.bsw-check{break-inside:avoid;display:block;margin:0 0 16px}
-.bsw-check-off{opacity:.55}
+.bsw-check-off .bsw-check-head,.bsw-check-off>.bsw-muted,.bsw-check-off .bsw-fields{opacity:.55}
+.bsw-preview{margin-top:14px;padding-top:12px;border-top:1px solid var(--line2)}
+.bsw-preview-head{display:flex;gap:12px;justify-content:space-between;align-items:center;font-size:12.5px}
+.bsw-preview .bsw-members li{padding:9px 0}
+.bsw-preview-line{display:flex!important;flex-flow:row wrap!important;gap:4px 8px;align-items:center;margin-top:5px;font-size:12px;color:var(--mu)}
+.bsw-preview-line em{font-style:normal;display:inline-flex;gap:6px;align-items:center}
+.bsw-preview-line time{color:var(--mu2)}
+.bsw-preview-line .bsw-m-info{flex-basis:100%;margin-top:0}
 .bsw-check-head{display:flex;gap:12px;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
 .bsw-check-head h3{font-size:14px;margin-top:3px}
 .bsw-check>p{margin-bottom:14px;font-size:12.5px}

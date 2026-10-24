@@ -565,6 +565,7 @@ sub run {
 
             my %present = map { $_->{id} => 1 } @$all;
             delete $st->{results}{$_} for grep { !$present{$_} } keys %{ $st->{results} };
+            delete @{ $st->{preview} }{ map { $_->{id} } @instances } if $st->{preview};    # live results take over
 
             # 1. Run the checks that are due.
             for my $inst (@instances) {
@@ -610,6 +611,35 @@ sub run {
             return finish( $st, $now, \%summary );
         },
         wait => $opt{wait},
+    );
+}
+
+# Run checks that are switched off, only to show their result in WHM. Nothing
+# is sent to Better Stack, so this never pings a heartbeat or opens an incident.
+# Options: only => instance id, type => check type.
+sub preview {
+    my (%opt) = @_;
+    return with_lock(
+        sub {
+            my $cfg = BetterStack::WHM::Config::load();
+            my $st  = BetterStack::WHM::Config::load_state();
+            my $ctx = {};
+            local $BetterStack::WHM::Util::LOG_LANG = admin_lang($cfg);
+            my $all = BetterStack::WHM::Checks::discover_all( $cfg, $ctx, all_types => 1 );
+            my %off = map { $_->{id} => 1 } grep { !$_->{enabled} } @$all;
+            delete $st->{preview}{$_} for grep { !$off{$_} } keys %{ $st->{preview} || {} };
+            my $ran = 0;
+            for my $inst ( grep { !$_->{enabled} } @$all ) {
+                next if defined $opt{only} && $opt{only} ne $inst->{id};
+                next if defined $opt{type} && $opt{type} ne $inst->{type};
+                my $res = BetterStack::WHM::Checks::run_instance( $cfg, $inst, $ctx );
+                $st->{preview}{ $inst->{id} } = { %$res, at => time, type => $inst->{type}, name_msg => $inst->{name_msg} };
+                $ran++;
+            }
+            BetterStack::WHM::Config::save_state($st);
+            return { ok => 1, ran => $ran, errors => [] };
+        },
+        wait => 1,
     );
 }
 

@@ -25,9 +25,9 @@ BetterStack::WHM::I18N::add(
     'cli.conn_ok'         => [ "Verbinding OK. Statuspagina's:", 'Connection OK. Status pages:', 'Verbindung OK. Statusseiten:' ],
     'cli.cleaned'         => [ 'Alles verwijderd uit Better Stack', 'Everything removed from Better Stack', 'Alles aus Better Stack entfernt' ],
     'cli.usage'           => [
-        "Gebruik: bswhm <commando>\n\n  run [--force]  Controles uitvoeren die aan de beurt zijn (cron, elke minuut)\n  sync           Heartbeats en statuspagina-items aanmaken/bijwerken\n  check          Alle controles lokaal draaien, zonder Better Stack\n  status         Laatste resultaten tonen\n  test           API-verbinding testen en statuspagina's tonen\n  cleanup        Alles wat deze plugin heeft aangemaakt uit Better Stack verwijderen\n",
-        "Usage: bswhm <command>\n\n  run [--force]  Run the checks that are due (cron, every minute)\n  sync           Create/update heartbeats and status page items\n  check          Run all checks locally, without Better Stack\n  status         Show the latest results\n  test           Test the API connection and list status pages\n  cleanup        Remove everything this plugin created from Better Stack\n",
-        "Verwendung: bswhm <Befehl>\n\n  run [--force]  Fällige Prüfungen ausführen (Cron, jede Minute)\n  sync           Heartbeats und Statusseiten-Elemente anlegen/aktualisieren\n  check          Alle Prüfungen lokal ausführen, ohne Better Stack\n  status         Letzte Ergebnisse anzeigen\n  test           API-Verbindung testen und Statusseiten auflisten\n  cleanup        Alles, was dieses Plugin angelegt hat, aus Better Stack entfernen\n",
+        "Gebruik: bswhm <commando>\n\n  run [--force]  Controles uitvoeren die aan de beurt zijn (cron, elke minuut)\n  sync           Heartbeats en statuspagina-items aanmaken/bijwerken\n  check [--all]  Alle controles lokaal draaien, zonder Better Stack (--all: ook uitgeschakelde)\n  status         Laatste resultaten tonen\n  test           API-verbinding testen en statuspagina's tonen\n  cleanup        Alles wat deze plugin heeft aangemaakt uit Better Stack verwijderen\n",
+        "Usage: bswhm <command>\n\n  run [--force]  Run the checks that are due (cron, every minute)\n  sync           Create/update heartbeats and status page items\n  check [--all]  Run all checks locally, without Better Stack (--all: switched-off ones too)\n  status         Show the latest results\n  test           Test the API connection and list status pages\n  cleanup        Remove everything this plugin created from Better Stack\n",
+        "Verwendung: bswhm <Befehl>\n\n  run [--force]  Fällige Prüfungen ausführen (Cron, jede Minute)\n  sync           Heartbeats und Statusseiten-Elemente anlegen/aktualisieren\n  check [--all]  Alle Prüfungen lokal ausführen, ohne Better Stack (--all: auch ausgeschaltete)\n  status         Letzte Ergebnisse anzeigen\n  test           API-Verbindung testen und Statusseiten auflisten\n  cleanup        Alles, was dieses Plugin angelegt hat, aus Better Stack entfernen\n",
     ],
 
     # ---- general
@@ -58,6 +58,10 @@ BetterStack::WHM::I18N::add(
     'ui.choose'           => [ '– kies –', '– choose –', '– auswählen –' ],
     'ui.no_data'          => [ 'Nog geen gegevens', 'No data yet', 'Noch keine Daten' ],
     'ui.private'          => [ 'Alleen zichtbaar in WHM', 'Only visible in WHM', 'Nur in WHM sichtbar' ],
+    'ui.preview'          => [ 'Testen', 'Test', 'Testen' ],
+    'ui.preview_help'     => [ 'Draait deze controle nu alleen op de server. Er gaat niets naar Better Stack, dus er ontstaat geen incident.', 'Runs this check now, on the server only. Nothing is sent to Better Stack, so no incident is created.', 'Führt diese Prüfung jetzt nur auf dem Server aus. Es wird nichts an Better Stack gesendet, also entsteht kein Vorfall.' ],
+    'ui.preview_hint'     => [ 'Uitgeschakeld. Testen toont het resultaat hier, zonder heartbeat of incident.', 'Switched off. Test shows the result here, without a heartbeat or incident.', 'Ausgeschaltet. Testen zeigt das Ergebnis hier, ohne Heartbeat oder Vorfall.' ],
+    'ui.preview_done'     => [ '%d uitgeschakelde controle(s) getest. Er is niets naar Better Stack gestuurd.', '%d switched-off check(s) tested. Nothing was sent to Better Stack.', '%d ausgeschaltete Prüfung(en) getestet. Es wurde nichts an Better Stack gesendet.' ],
 
     # ---- status words
     'ui.st_ok'   => [ 'Operationeel', 'Operational', 'Betriebsbereit' ],

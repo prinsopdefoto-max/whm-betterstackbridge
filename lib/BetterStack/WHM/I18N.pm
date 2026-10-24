@@ -149,6 +149,7 @@ my %RAW = (
     'param.crit_days'       => [ 'Storing (dagen)', 'Outage (days)', 'Störung (Tage)' ],
     'param.max_age_hours'   => [ 'Maximale leeftijd (uur)', 'Maximum age (hours)', 'Maximales Alter (Stunden)' ],
     'param.partial_is_fail' => [ 'Gedeeltelijk mislukt telt als storing', 'Partial failure counts as outage', 'Teilweiser Fehler zählt als Störung' ],
+    'param.skip_suspended'  => [ 'Geschorste accounts uitsluiten', 'Exclude suspended accounts', 'Gesperrte Konten ausschließen' ],
 
     # instance names (public)
     'name.server'    => [ 'Server', 'Server', 'Server' ],
@@ -225,6 +226,7 @@ my %RAW = (
     'r.ssl_crit'         => [ 'Kritiek: %s', 'Critical: %s', 'Kritisch: %s' ],
     'r.ssl_warn'         => [ 'Waarschuwing: %s', 'Warning: %s', 'Warnung: %s' ],
     'r.ssl_first'        => [ 'Eerstvolgende: %s', 'Next: %s', 'Nächstes: %s' ],
+    'r.ssl_skipped'      => [ '%d certificaten van geschorste accounts overgeslagen', '%d certificates of suspended accounts skipped', '%d Zertifikate gesperrter Konten übersprungen' ],
     'r.backup_none'      => [ 'Geen back-up gevonden', 'No backup found', 'Kein Backup gefunden' ],
     'r.backup_nologs'    => [ 'Geen logs in %s', 'No logs in %s', 'Keine Logs in %s' ],
     'r.backup_failed'    => [ 'Mislukt, laatste %s geleden', 'Failed, last one %s ago', 'Fehlgeschlagen, letztes vor %s' ],

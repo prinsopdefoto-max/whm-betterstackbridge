@@ -66,12 +66,14 @@ my %commands = (
     },
     check => sub {
         # Run all checks locally without contacting Better Stack.
+        # --all: also the checks and check types that are switched off.
         my $cfg = BetterStack::WHM::Config::load();
         my $ctx = {};
-        for my $i ( @{ BetterStack::WHM::Checks::discover_all( $cfg, $ctx ) } ) {
+        my $all = grep { $_ eq '--all' } @ARGV;
+        for my $i ( @{ BetterStack::WHM::Checks::discover_all( $cfg, $ctx, all_types => $all ) } ) {
             my $r    = BetterStack::WHM::Checks::run_instance( $cfg, $i, $ctx );
             my $info = render( $r->{info} );
-            printf "%-28s %-5s %s%s\n", $i->{id}, $r->{status}, render( $r->{detail} ), length $info ? "  [$info]" : '';
+            printf "%-28s %-5s %s%s%s\n", $i->{id}, $r->{status}, render( $r->{detail} ), length $info ? "  [$info]" : '', $i->{enabled} ? '' : ' (' . T('cli.off') . ')';
         }
         return 1;
     },

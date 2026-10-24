@@ -1,2 +1,4 @@
 # StatusBridge for WHM: runs due checks and reports heartbeats.
 * * * * * root /usr/local/cpanel/3rdparty/bin/perl /opt/betterstack-whm/bin/bswhm run >/dev/null 2>&1
+# Once a day: look for updates in the git clone the plugin was installed from (WHM shows them).
+23 5 * * * root /usr/local/cpanel/3rdparty/bin/perl /opt/betterstack-whm/bin/bswhm update-check >/dev/null 2>&1

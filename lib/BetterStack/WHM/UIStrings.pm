@@ -25,10 +25,32 @@ BetterStack::WHM::I18N::add(
     'cli.conn_ok'         => [ "Verbinding OK. Statuspagina's:", 'Connection OK. Status pages:', 'Verbindung OK. Statusseiten:' ],
     'cli.cleaned'         => [ 'Alles verwijderd uit Better Stack', 'Everything removed from Better Stack', 'Alles aus Better Stack entfernt' ],
     'cli.usage'           => [
-        "Gebruik: bswhm <commando>\n\n  run [--force]  Controles uitvoeren die aan de beurt zijn (cron, elke minuut)\n  sync           Heartbeats en statuspagina-items aanmaken/bijwerken\n  check [--all]  Alle controles lokaal draaien, zonder Better Stack (--all: ook uitgeschakelde)\n  status         Laatste resultaten tonen\n  test           API-verbinding testen en statuspagina's tonen\n  cleanup        Alles wat deze plugin heeft aangemaakt uit Better Stack verwijderen\n",
-        "Usage: bswhm <command>\n\n  run [--force]  Run the checks that are due (cron, every minute)\n  sync           Create/update heartbeats and status page items\n  check [--all]  Run all checks locally, without Better Stack (--all: switched-off ones too)\n  status         Show the latest results\n  test           Test the API connection and list status pages\n  cleanup        Remove everything this plugin created from Better Stack\n",
-        "Verwendung: bswhm <Befehl>\n\n  run [--force]  Fällige Prüfungen ausführen (Cron, jede Minute)\n  sync           Heartbeats und Statusseiten-Elemente anlegen/aktualisieren\n  check [--all]  Alle Prüfungen lokal ausführen, ohne Better Stack (--all: auch ausgeschaltete)\n  status         Letzte Ergebnisse anzeigen\n  test           API-Verbindung testen und Statusseiten auflisten\n  cleanup        Alles, was dieses Plugin angelegt hat, aus Better Stack entfernen\n",
+        "Gebruik: bswhm <commando>\n\n  run [--force]  Controles uitvoeren die aan de beurt zijn (cron, elke minuut)\n  sync           Heartbeats en statuspagina-items aanmaken/bijwerken\n  check [--all]  Alle controles lokaal draaien, zonder Better Stack (--all: ook uitgeschakelde)\n  status         Laatste resultaten tonen\n  test           API-verbinding testen en statuspagina's tonen\n  update-check   Controleren of er een nieuwe versie in de git-repository staat\n  cleanup        Alles wat deze plugin heeft aangemaakt uit Better Stack verwijderen\n",
+        "Usage: bswhm <command>\n\n  run [--force]  Run the checks that are due (cron, every minute)\n  sync           Create/update heartbeats and status page items\n  check [--all]  Run all checks locally, without Better Stack (--all: switched-off ones too)\n  status         Show the latest results\n  test           Test the API connection and list status pages\n  update-check   Check the git repository for a new version\n  cleanup        Remove everything this plugin created from Better Stack\n",
+        "Verwendung: bswhm <Befehl>\n\n  run [--force]  Fällige Prüfungen ausführen (Cron, jede Minute)\n  sync           Heartbeats und Statusseiten-Elemente anlegen/aktualisieren\n  check [--all]  Alle Prüfungen lokal ausführen, ohne Better Stack (--all: auch ausgeschaltete)\n  status         Letzte Ergebnisse anzeigen\n  test           API-Verbindung testen und Statusseiten auflisten\n  update-check   Im Git-Repository nach einer neuen Version suchen\n  cleanup        Alles, was dieses Plugin angelegt hat, aus Better Stack entfernen\n",
     ],
+
+    # ---- updates
+    'upd.title'          => [ 'Updates', 'Updates', 'Updates' ],
+    'upd.title_d'        => [ 'Nieuwe versies uit de git-repository waarvan deze plugin is geïnstalleerd.', 'New versions from the git repository this plugin was installed from.', 'Neue Versionen aus dem Git-Repository, aus dem dieses Plugin installiert wurde.' ],
+    'upd.installed'      => [ 'Geïnstalleerd', 'Installed', 'Installiert' ],
+    'upd.status'         => [ 'Status', 'Status', 'Status' ],
+    'upd.terminal'       => [ 'Via de terminal', 'From a terminal', 'Über das Terminal' ],
+    'upd.terminal_help'  => [ 'Als root op de server. De code draait als root: bekijk de wijzigingen vóór install.sh, bijvoorbeeld met git log -p HEAD@{1}..', 'As root on the server. The code runs as root: review the changes before install.sh, for example with git log -p HEAD@{1}..', 'Als root auf dem Server. Der Code läuft als root: prüfen Sie die Änderungen vor install.sh, z. B. mit git log -p HEAD@{1}..' ],
+    'upd.help'           => [ 'Wordt dagelijks gecontroleerd. Er wordt hier niets geïnstalleerd: bijwerken doe je zelf in de terminal.', 'Checked daily. Nothing is installed from here: you update from a terminal yourself.', 'Wird täglich geprüft. Hier wird nichts installiert: Sie aktualisieren selbst im Terminal.' ],
+    'upd.never'          => [ 'Nog niet gecontroleerd.', 'Not checked yet.', 'Noch nicht geprüft.' ],
+    'upd.current'        => [ 'Je gebruikt de nieuwste versie.', 'You are on the latest version.', 'Sie verwenden die neueste Version.' ],
+    'upd.available'      => [ 'Update beschikbaar: %d nieuwe wijziging(en).', 'Update available: %d new change(s).', 'Update verfügbar: %d neue Änderung(en).' ],
+    'upd.more'           => [ 'en nog %d oudere wijziging(en).', 'and %d older change(s).', 'und %d ältere Änderung(en).' ],
+    'upd.checked'        => [ 'Laatst gecontroleerd: %s', 'Last checked: %s', 'Zuletzt geprüft: %s' ],
+    'upd.show'           => [ 'Bekijken', 'View', 'Ansehen' ],
+    'upd.check_now'      => [ 'Nu controleren', 'Check now', 'Jetzt prüfen' ],
+    'upd.how'            => [ 'Bijwerken:', 'To update:', 'Aktualisieren:' ],
+    'upd.no_info'        => [ 'Onbekend vanaf welke map de plugin is geïnstalleerd. Voer ./install.sh één keer uit vanuit je git-clone; daarna werkt de updatecontrole.', 'Unknown which directory the plugin was installed from. Run ./install.sh once from your git clone; after that the update check works.', 'Unbekannt, aus welchem Verzeichnis das Plugin installiert wurde. Führen Sie ./install.sh einmal aus Ihrem Git-Klon aus; danach funktioniert die Update-Prüfung.' ],
+    'upd.no_upstream'    => [ 'De git-clone volgt geen remote branch, dus er valt niets te vergelijken. Stel er een in met git branch -u origin/main en voer ./install.sh opnieuw uit.', 'The git clone does not track a remote branch, so there is nothing to compare with. Set one with git branch -u origin/main and run ./install.sh again.', 'Der Git-Klon folgt keinem Remote-Branch, es gibt also nichts zu vergleichen. Legen Sie einen mit git branch -u origin/main fest und führen Sie ./install.sh erneut aus.' ],
+    'upd.missing'        => [ 'Installatiemap niet gevonden: %s', 'Install directory not found: %s', 'Installationsverzeichnis nicht gefunden: %s' ],
+    'upd.unsafe'         => [ 'Geweigerd: %s is niet van root of is door anderen te wijzigen.', 'Refused: %s is not owned by root or is writable by others.', 'Abgelehnt: %s gehört nicht root oder ist für andere beschreibbar.' ],
+    'upd.fetch_failed'   => [ 'Kon de repository niet ophalen (inloggegevens of netwerk?): %s', 'Could not fetch the repository (credentials or network?): %s', 'Repository konnte nicht abgerufen werden (Zugangsdaten oder Netzwerk?): %s' ],
 
     # ---- general
     'ui.denied'           => [ 'Toegang geweigerd: alleen root kan deze plugin gebruiken.', 'Access denied: only root can use this plugin.', 'Zugriff verweigert: nur root kann dieses Plugin verwenden.' ],
@@ -61,6 +83,8 @@ BetterStack::WHM::I18N::add(
     'ui.preview'          => [ 'Testen', 'Test', 'Testen' ],
     'ui.preview_help'     => [ 'Draait deze controle nu alleen op de server. Er gaat niets naar Better Stack, dus er ontstaat geen incident.', 'Runs this check now, on the server only. Nothing is sent to Better Stack, so no incident is created.', 'Führt diese Prüfung jetzt nur auf dem Server aus. Es wird nichts an Better Stack gesendet, also entsteht kein Vorfall.' ],
     'ui.preview_hint'     => [ 'Uitgeschakeld. Testen toont het resultaat hier, zonder heartbeat of incident.', 'Switched off. Test shows the result here, without a heartbeat or incident.', 'Ausgeschaltet. Testen zeigt das Ergebnis hier, ohne Heartbeat oder Vorfall.' ],
+    'ui.preview_busy'     => [ 'Bezig…', 'Running…', 'Läuft…' ],
+    'ui.preview_failed'   => [ 'Testen mislukt. Laad de pagina opnieuw en probeer het nog eens.', 'Test failed. Reload the page and try again.', 'Test fehlgeschlagen. Seite neu laden und erneut versuchen.' ],
     'ui.preview_done'     => [ '%d uitgeschakelde controle(s) getest. Er is niets naar Better Stack gestuurd.', '%d switched-off check(s) tested. Nothing was sent to Better Stack.', '%d ausgeschaltete Prüfung(en) getestet. Es wurde nichts an Better Stack gesendet.' ],
 
     # ---- status words

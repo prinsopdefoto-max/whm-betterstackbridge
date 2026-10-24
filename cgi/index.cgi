@@ -19,6 +19,7 @@ use BetterStack::WHM::Config ();
 use BetterStack::WHM::Engine ();
 use BetterStack::WHM::I18N qw(T render render_msg);
 use BetterStack::WHM::UIStrings ();
+use BetterStack::WHM::Update ();
 use BetterStack::WHM::Util qw(log_file var_dir read_json write_json);
 
 my @TABS = qw(overview items checks settings log);
@@ -174,6 +175,12 @@ sub handle_action {
         die "invalid check\n" if $by_type && !$BetterStack::WHM::Checks::TYPES{$what};
         my $r = BetterStack::WHM::Engine::preview( $by_type ? ( type => $what ) : ( only => $what ) );
         report( $r, T( 'ui.preview_done', $r->{ran} // 0 ) );
+    }
+    elsif ( $action eq 'update_check' ) {
+        my $s = BetterStack::WHM::Update::check();
+        push @messages, $s->{state} eq 'current' ? [ 'success', T('upd.current') ]
+          : $s->{state} eq 'available' ? [ 'info', T( 'upd.available', $s->{count} // 1 ) ]
+          :                              [ 'error', render_msg( $s->{reason} ) ];
     }
     elsif ( $action eq 'run' ) {
         my $r = BetterStack::WHM::Engine::run( force => 1 );
@@ -415,8 +422,10 @@ sub render_page {
     $count{ ( $st->{results}{ $_->{id} } || {} )->{status} // 'none' }++ for @enabled;
     my $overall = worst( map { ( $st->{results}{ $_->{id} } || {} )->{status} } @enabled );
     my @serr    = sync_errors();
+    my $upd     = BetterStack::WHM::Update::status();
+    my $upd_available = $upd && $upd->{state} eq 'available';
 
-    my $o = style() . '<div class="bsw bsw-nojs" id="bsw" data-start="' . h($tab) . '">';
+    my $o = style() . '<div class="bsw bsw-nojs" id="bsw" data-start="' . h($tab) . '" data-busy="' . th('ui.preview_busy') . '" data-failed="' . th('ui.preview_failed') . '">';
 
     # ---- header
     my $conn = !$configured ? [ 'none', T('ui.conn_none') ] : @serr ? [ 'warn', T('ui.conn_errors') ] : [ 'ok', T('ui.conn_ok') ];
@@ -440,7 +449,7 @@ sub render_page {
     for my $t (@TABS) {
         my $extra = '';
         $extra = sprintf( '<span class="bsw-count bsw-c-fail">%d</span>', $count{fail} ) if $t eq 'overview' && $count{fail};
-        $extra = '<span class="bsw-count bsw-c-warn">1</span>' if $t eq 'settings' && ( !$configured || @serr );
+        $extra = '<span class="bsw-count bsw-c-warn">1</span>' if $t eq 'settings' && ( !$configured || @serr || $upd_available );
         $o .= sprintf '<a href="#%s" class="bsw-tab%s" data-tab="%s" role="tab">%s<span>%s</span>%s</a>', $t, ( $t eq $tab ? ' bsw-active' : '' ), $t, icon( $tabicon{$t} ),
           th("ui.tab_$t"), $extra;
     }
@@ -450,6 +459,11 @@ sub render_page {
     for my $m (@messages) {
         my $ic = { success => 'check', error => 'fail', info => 'info' }->{ $m->[0] } // 'info';
         $o .= sprintf '<div class="bsw-flash bsw-f-%s">%s<div>%s</div></div>', h( $m->[0] ), icon($ic), h( $m->[1] );
+    }
+
+    if ($upd_available) {
+        $o .= '<div class="bsw-flash bsw-f-info">' . icon('refresh') . '<div>' . th( 'upd.available', $upd->{count} // 1 )
+          . ' <a href="#settings" data-goto="settings" class="bsw-link">' . th('upd.show') . '</a></div></div>';
     }
 
     $o .= panel_overview( $configured, $units, \%count, $overall, \@serr, $page );
@@ -585,16 +599,23 @@ sub panel_items {
 
 # ---------------------------------------------------------------- preview
 
+# The test button posts the form; with JavaScript the result is fetched in the
+# background and only the element with id $target is replaced. Without
+# JavaScript the page reloads and jumps back to that element.
 sub preview_button {
-    my ($value) = @_;
-    return '<button class="bsw-btn bsw-btn-sm" name="action" value="' . h($value) . '" title="' . th('ui.preview_help') . '">' . icon('play') . th('ui.preview') . '</button>';
+    my ( $value, $target ) = @_;
+    return sprintf '<button class="bsw-btn bsw-btn-sm" name="action" value="%s" formaction="index.cgi#%s" data-preview="%s" title="%s">%s<span>%s</span></button>', h($value), h($target),
+      h($target), th('ui.preview_help'), icon('play'), th('ui.preview');
 }
+
+sub preview_anchor { my $id = shift; $id =~ s/[^\w-]/_/g; return "bsw-pv-$id" }
 
 # Test result of a switched-off instance, below its name on the status page tab.
 sub preview_line {
     my ($id) = @_;
-    my $r = ( $st->{preview} || {} )->{$id};
-    my $o = '<span class="bsw-preview-line">' . preview_button("preview:$id");
+    my $r      = ( $st->{preview} || {} )->{$id};
+    my $anchor = preview_anchor($id);
+    my $o      = '<span class="bsw-preview-line" id="' . h($anchor) . '">' . preview_button( "preview:$id", $anchor );
     if ($r) {
         my $info = render( $r->{info} );
         $o .= sprintf '<em>%s%s %s</em><time>%s</time>', dot( $r->{status} ), h( status_word( $r->{status} ) ), h( render( $r->{detail} ) ), h( ago( $r->{at} ) );
@@ -608,7 +629,9 @@ sub preview_block {
     my ($type) = @_;
     my $pv = $st->{preview} || {};
     my @ids = sort grep { ( $pv->{$_}{type} // '' ) eq $type } keys %$pv;
-    my $o = '<div class="bsw-preview"><div class="bsw-preview-head"><span class="bsw-muted">' . th('ui.preview_hint') . '</span>' . preview_button("preview_type:$type") . '</div>';
+    my $anchor = preview_anchor("type-$type");
+    my $o = '<div class="bsw-preview" id="' . h($anchor) . '"><div class="bsw-preview-head"><span class="bsw-muted">' . th('ui.preview_hint') . '</span>'
+      . preview_button( "preview_type:$type", $anchor ) . '</div>';
     if (@ids) {
         $o .= '<ul class="bsw-members">';
         for my $id (@ids) {
@@ -726,6 +749,8 @@ sub panel_settings {
       . '</details>';
     $o .= savebar( T('ui.settings_note'), T('ui.save_settings') ) . '</form>';
 
+    $o .= panel_updates();
+
     # danger zone
     $o .= form_open( 'cleanup', 'settings', 'bsw-card bsw-danger' )
       . '<div><div><h3>' . th('ui.danger_title') . '</h3><p>' . th('ui.danger_text') . '</p></div></div>'
@@ -733,6 +758,45 @@ sub panel_settings {
       . '<button class="bsw-btn bsw-btn-danger">' . th('ui.danger_button') . '</button></div></form>';
     $o .= '</section>';
     return $o;
+}
+
+# Update check of the git clone the plugin was installed from.
+sub panel_updates {
+    my $info = BetterStack::WHM::Update::install_info();
+    my $s    = BetterStack::WHM::Update::status();
+    my $btn  = sub {
+        my ( $action, $label, $ic ) = @_;
+        return sprintf '<button class="bsw-btn" name="action" value="%s" data-busy-label="%s">%s<span>%s</span></button>', $action, th('ui.preview_busy'), icon($ic), h($label);
+    };
+
+    my $state;
+    if    ( !$s )                         { $state = '<p>' . th('upd.never') . '</p>' }
+    elsif ( $s->{state} eq 'current' )    { $state = '<p class="bsw-upd-ok">' . icon('check') . th('upd.current') . '</p>' }
+    elsif ( $s->{state} eq 'available' ) {
+        $state = '<p class="bsw-upd-new">' . icon('refresh') . th( 'upd.available', $s->{count} // 1 ) . '</p>';
+        if ( @{ $s->{commits} || [] } ) {
+            $state .= '<ul class="bsw-commits">'
+              . join( '', map { sprintf '<li><code>%s</code><span>%s</span><time>%s</time></li>', h( $_->[0] ), h( $_->[2] // '' ), h( ago( $_->[1] ) ) } @{ $s->{commits} } )
+              . '</ul>';
+            $state .= '<div class="bsw-help">' . th( 'upd.more', $s->{count} - @{ $s->{commits} } ) . '</div>' if ( $s->{count} // 0 ) > @{ $s->{commits} };
+        }
+    }
+    else { $state = '<div class="bsw-help bsw-help-warn">' . icon('warn') . h( render_msg( $s->{reason} ) ) . '</div>' }
+    $state .= '<div class="bsw-help">' . th( 'upd.checked', ago( $s->{at} ) ) . '</div>' if $s;
+
+    my $buttons = '<div class="bsw-inline-row bsw-mt">' . $btn->( 'update_check', T('upd.check_now'), 'refresh' );
+    $buttons .= '</div>';
+
+    my $installed = $info
+      ? sprintf( '<span class="bsw-upd-src"><span class="bsw-mono">%s</span> &middot; %s</span>', h( substr( $info->{commit} || '-', 0, 7 ) ), h( $info->{source} . ( $info->{upstream} ? " ($info->{upstream})" : '' ) ) )
+      : h( T('upd.no_info') );
+
+    my $o = form_open( 'update_check', 'settings' );
+    $o .= group( 'refresh', T('upd.title'), T('upd.title_d'),
+        field( T('upd.installed'), $installed . '<div class="bsw-help">' . h($BetterStack::WHM::Util::VERSION) . ( $info && $info->{at} ? ' &middot; ' . h( ago( $info->{at} ) ) : '' ) . '</div>' )
+          . field( T('upd.status'), $state . $buttons, T('upd.help') )
+          . field( T('upd.terminal'), '<code class="bsw-cmd">' . h( BetterStack::WHM::Update::command($info) ) . '</code>', T('upd.terminal_help') ) );
+    return $o . '</form>';
 }
 
 sub group {
@@ -798,6 +862,50 @@ sub script {
     if (history.replaceState) history.replaceState(null, '', '#' + t);
   });
   if (location.hash.length > 1) show(location.hash.slice(1)); else show(root.getAttribute('data-start'));
+
+  // Test buttons of switched-off checks: run the test in the background and
+  // replace only its result, so the page does not reload or scroll away.
+  root.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-preview]');
+    if (!b || !root.contains(b) || !window.fetch || !window.DOMParser) return;
+    e.preventDefault();
+    if (b.disabled) return;
+    var id = b.getAttribute('data-preview'), f = b.form, label = b.querySelector('span'), text = label.textContent;
+    var body = new URLSearchParams();
+    body.append('csrf', f.querySelector('input[name=csrf]').value);
+    body.append('tab', f.querySelector('input[name=tab]').value);
+    body.append('action', b.value);
+    b.disabled = true;
+    b.classList.add('bsw-busy');
+    label.textContent = root.getAttribute('data-busy');
+    var fail = function (msg) {
+      b.disabled = false;
+      b.classList.remove('bsw-busy');
+      label.textContent = text;
+      var old = document.getElementById(id);
+      if (!old) return;
+      var p = old.querySelector('.bsw-preview-err') || old.appendChild(document.createElement('em'));
+      p.className = 'bsw-preview-err';
+      p.textContent = msg || root.getAttribute('data-failed');
+    };
+    fetch(f.getAttribute('action'), { method: 'POST', body: body, credentials: 'same-origin' })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var fresh = doc.getElementById(id), old = document.getElementById(id);
+        var err = doc.querySelector('#bsw .bsw-flash.bsw-f-error');
+        if (!fresh || !old) return fail(err && err.textContent.trim());
+        old.replaceWith(document.importNode(fresh, true));
+        if (err) fail(err.textContent.trim());
+      })
+      .catch(function () { fail(); });
+  });
+  root.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-busy-label]');
+    if (!b || !root.contains(b)) return;
+    // Not disabled: a disabled button would not submit its action.
+    setTimeout(function () { b.classList.add('bsw-busy'); b.querySelector('span').textContent = b.getAttribute('data-busy-label'); }, 0);
+  });
   root.querySelectorAll('.bsw-danger').forEach(function (f) {
     f.addEventListener('submit', function (e) { if (!window.confirm(f.querySelector('button').textContent.trim() + '?')) e.preventDefault(); });
   });
@@ -974,6 +1082,18 @@ sub style {
 .bsw-preview-line em{font-style:normal;display:inline-flex;gap:6px;align-items:center}
 .bsw-preview-line time{color:var(--mu2)}
 .bsw-preview-line .bsw-m-info{flex-basis:100%;margin-top:0}
+.bsw .bsw-btn.bsw-busy{cursor:progress;opacity:.75}
+.bsw-upd-ok,.bsw-upd-new{display:flex;gap:7px;align-items:center;margin:0;font-weight:500}
+.bsw-upd-ok .bsw-ic{color:var(--ok-t)}.bsw-upd-new .bsw-ic{color:var(--warn-t)}
+.bsw-commits{list-style:none;margin:8px 0 0;padding:0;border:1px solid var(--line2);border-radius:6px;max-height:260px;overflow:auto}
+.bsw-commits li{display:flex;gap:10px;align-items:baseline;padding:6px 10px;font-size:12.5px}
+.bsw-commits li+li{border-top:1px solid var(--line2)}
+.bsw-commits span{flex:1;min-width:0}.bsw-commits time{color:var(--mu2);font-size:12px;white-space:nowrap}
+.bsw-upd-src{overflow-wrap:anywhere}
+.bsw-cmd{display:block;max-width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line2);border-radius:6px;overflow-x:auto;white-space:nowrap;font-size:12px}
+.bsw .bsw-btn.bsw-busy .bsw-ic{animation:bsw-pulse 1s ease-in-out infinite}
+@keyframes bsw-pulse{50%{opacity:.2}}
+.bsw-preview-err{display:block;flex-basis:100%;font-style:normal;color:var(--fail-t);font-size:12px;margin-top:4px}
 .bsw-check-head{display:flex;gap:12px;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
 .bsw-check-head h3{font-size:14px;margin-top:3px}
 .bsw-check>p{margin-bottom:14px;font-size:12.5px}
@@ -1012,12 +1132,12 @@ sub style {
 .bsw-switches{display:flex;flex-wrap:wrap;gap:12px 24px}
 
 /* settings */
-.bsw-group{display:grid;grid-template-columns:260px 1fr;gap:32px;padding:24px 0;border-top:1px solid var(--line)}
+.bsw-group{display:grid;grid-template-columns:260px minmax(0,1fr);gap:32px;padding:24px 0;border-top:1px solid var(--line)}
 .bsw-group:first-of-type{border-top:0;padding-top:0}
 .bsw-group-label h3{font-size:14px;margin-bottom:4px}
 .bsw-group-label p{color:var(--mu);font-size:12.5px}
 .bsw-group-body{padding:4px 20px}
-.bsw-setting{display:grid;grid-template-columns:180px 1fr;gap:18px;padding:14px 0}
+.bsw-setting{display:grid;grid-template-columns:180px minmax(0,1fr);gap:18px;padding:14px 0}
 .bsw-setting+.bsw-setting{border-top:1px solid var(--line2)}
 .bsw-setting-label{font-weight:500;padding-top:7px;color:var(--ink2)}
 .bsw-help{margin-top:6px;font-size:12px;color:var(--mu);display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}

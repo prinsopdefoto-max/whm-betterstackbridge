@@ -165,13 +165,15 @@ subtest 'ssl: suspended accounts can be left out' => sub {
     my $dir = tempdir( CLEANUP => 1 );
     local $BetterStack::WHM::Checks::VARCP = "$dir/var";
     local $BetterStack::WHM::Checks::ETC   = "$dir/etc";
+    local $BetterStack::WHM::Checks::SSL_CACHE = "$dir/ssl-dates.json";
     system 'mkdir', '-p', "$dir/var/suspended", "$dir/etc", map { "$dir/var/ssl/apache_tls/$_" } qw(good.nl bad.nl sub.bad.nl);
     my $touch = sub { open my $fh, '>', $_[0] or die; print $fh $_[1] // ''; close $fh };
     $touch->("$dir/var/ssl/apache_tls/$_/combined") for qw(good.nl bad.nl sub.bad.nl);
     $touch->("$dir/var/suspended/baduser");
     $touch->("$dir/etc/userdomains", "good.nl: gooduser\nbad.nl: baduser\nsub.bad.nl: baduser\n*: nobody\n");
     no warnings 'redefine';
-    local *BetterStack::WHM::Checks::cert_end_epoch = sub { time + ( $_[0] =~ /good/ ? 60 : 1 ) * 86400 + 3600 };
+    my $openssl = 0;
+    local *BetterStack::WHM::Checks::cert_end_epoch = sub { $openssl++; time + ( $_[0] =~ /good/ ? 60 : 1 ) * 86400 + 3600 };
     my $ts = { warn_days => 14, crit_days => 3 };
     my $r = BetterStack::WHM::Checks::run_ssl( {}, $ts );
     is( $r->{status}, 'fail', 'expiring certificate of a suspended account counts by default' );
@@ -181,6 +183,13 @@ subtest 'ssl: suspended accounts can be left out' => sub {
     like( R( $r->{info} ), qr/^.*\b2\b.*/, 'skipped count shown in WHM' );
     unlink "$dir/var/suspended/baduser";
     is( BetterStack::WHM::Checks::run_ssl( {}, { %$ts, skip_suspended => 1 } )->{status}, 'fail', 'unsuspended accounts count again' );
+
+    $openssl = 0;
+    BetterStack::WHM::Checks::run_ssl( {}, $ts );
+    is( $openssl, 0, 'known certificates are not read again' );
+    $touch->( "$dir/var/ssl/apache_tls/good.nl/combined", 'renewed' );
+    BetterStack::WHM::Checks::run_ssl( {}, $ts );
+    is( $openssl, 1, 'a renewed certificate is read again' );
 };
 
 done_testing;

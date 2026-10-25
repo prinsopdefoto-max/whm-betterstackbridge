@@ -111,6 +111,8 @@ sub handle_action {
         $cfg->{section_mode} = ( $f->{section_mode} // '' ) eq 'category' ? 'category' : 'single';
         $cfg->{$_} = $f->{$_} ? 1 : 0 for qw(alert_email alert_sms alert_call alert_push publish_details delete_removed maint_enabled maint_report maint_notify);
         $cfg->{maint_minutes} = int num( $f->{maint_minutes}, $cfg->{maint_minutes}, 1, 720 );
+        # Only when the list was on the page (it is missing when the API could not be reached).
+        $cfg->{maint_monitors} = [ sort map { /^maint_mon_(\d{1,20})\z/ ? $1 : () } grep { $f->{$_} } keys %$f ] if $f->{maint_mon_list};
         $cfg->{grace_pct}        = num( $f->{grace_pct},        $cfg->{grace_pct},        0,  500 );
         $cfg->{details_interval} = num( $f->{details_interval}, $cfg->{details_interval}, 60, 86400 );
         $cfg->{ui_lang}     = BetterStack::WHM::I18N::valid( $f->{ui_lang} )     ? $f->{ui_lang}     : 'auto' if defined $f->{ui_lang};
@@ -323,6 +325,25 @@ sub status_pages {
         { id => "$_->{id}", name => $a->{company_name} // '', domain => $a->{custom_domain} || ( length( $a->{subdomain} // '' ) ? "$a->{subdomain}.betteruptime.com" : '' ) }
     } @$pages;
     eval { write_json( $file, { key => $key, at => time, pages => \@slim } ) };
+    return ( \@slim, undef );
+}
+
+# Uptime monitors of the account (for maintenance), cached for 10 minutes (per token).
+sub monitors {
+    return ( undef, undef ) unless length $cfg->{api_token};
+    my $file  = var_dir() . '/monitors.json';
+    my $key   = Digest::SHA::sha256_hex( $cfg->{api_token} . '|' . $cfg->{api_base} );
+    my $cache = read_json($file);
+    if ( $cache && ( $cache->{key} // '' ) eq $key && time - ( $cache->{at} // 0 ) < 600 && ref $cache->{monitors} eq 'ARRAY' ) {
+        return ( $cache->{monitors}, undef );
+    }
+    my ( $list, $err ) = BetterStack::WHM::API->from_config($cfg)->list_monitors;
+    return ( undef, $err ) if $err;
+    my @slim = sort { lc $a->{name} cmp lc $b->{name} } map {
+        my $a = $_->{attributes} || {};
+        { id => "$_->{id}", name => $a->{pronounceable_name} || $a->{url} || "#$_->{id}", url => $a->{url} // '' }
+    } grep { ref $_ eq 'HASH' && ( $_->{id} // '' ) =~ /^\d{1,20}\z/ } @$list;
+    eval { write_json( $file, { key => $key, at => time, monitors => \@slim } ) };
     return ( \@slim, undef );
 }
 
@@ -940,7 +961,8 @@ sub panel_settings {
         field( T('mt.f_reboot'), switch( 'maint_enabled', $cfg->{maint_enabled}, T('mt.f_reboot_on') ), T('mt.f_reboot_help') )
           . field( T('mt.f_minutes'), sprintf( '<div class="bsw-unit-input"><input type="number" name="maint_minutes" value="%d" min="1" max="720"><em>%s</em></div>', $cfg->{maint_minutes}, th('mt.minutes') ), T('mt.f_minutes_help') )
           . field( T('mt.f_page'),
-            '<div class="bsw-switches">' . switch( 'maint_report', $cfg->{maint_report}, T('mt.f_report_on') ) . switch( 'maint_notify', $cfg->{maint_notify}, T('mt.f_notify_on') ) . '</div>' ) );
+            '<div class="bsw-switches">' . switch( 'maint_report', $cfg->{maint_report}, T('mt.f_report_on') ) . switch( 'maint_notify', $cfg->{maint_notify}, T('mt.f_notify_on') ) . '</div>' )
+          . ( $configured ? field( T('mt.f_monitors'), monitor_choice(), T('mt.f_monitors_help') ) : '' ) );
 
     # advanced
     $o .= '<details class="bsw-adv"><summary>' . icon('chevron') . th('ui.g_advanced') . '</summary>'
@@ -1004,6 +1026,16 @@ sub panel_updates {
           . field( T('upd.status'), $state . $buttons, T('upd.help') )
           . field( T('upd.terminal'), '<code class="bsw-cmd">' . h( BetterStack::WHM::Update::command($info) ) . '</code>', T('upd.terminal_help') ) );
     return $o . '</form>';
+}
+
+sub monitor_choice {
+    my ( $list, $err ) = monitors();
+    return '<div class="bsw-help bsw-help-warn">' . icon('warn') . th( 'mt.monitors_failed', $err ) . '</div>' if $err;
+    return '<div class="bsw-help">' . th('mt.no_monitors') . '</div>' unless $list && @$list;
+    my %on = map { $_ => 1 } @{ $cfg->{maint_monitors} || [] };
+    return '<input type="hidden" name="maint_mon_list" value="1"><div class="bsw-monlist">'
+      . join( '', map { switch( "maint_mon_$_->{id}", $on{ $_->{id} }, $_->{name} . ( $_->{url} && $_->{url} ne $_->{name} ? " ($_->{url})" : '' ), small => 1 ) } @$list )
+      . '</div>';
 }
 
 sub group {
@@ -1343,6 +1375,7 @@ sub style {
 .bsw-preview-line time{color:var(--mu2)}
 .bsw-preview-line .bsw-m-info{flex-basis:100%;margin-top:0}
 .bsw .bsw-btn.bsw-busy{cursor:progress;opacity:.75}
+.bsw-monlist{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto;padding:2px}
 .bsw-maint{align-items:center}.bsw-maint>div{flex:1}
 .bsw-maint-start{display:flex;gap:16px;justify-content:space-between;align-items:center;flex-wrap:wrap;padding:16px 20px;margin-top:24px}
 .bsw-maint-start h3{font-size:14px}.bsw-maint-start p{margin:2px 0 0}.bsw-maint-start .bsw-unit-input{width:130px}

@@ -7,6 +7,9 @@ package BetterStack::WHM::Maintenance;
 #   not come back, the heartbeats alert again once the window has passed.
 # - Optionally a maintenance report on the status page, with this server's
 #   items marked as "maintenance".
+# - Other Better Stack monitors chosen in WHM (for example URL monitors of
+#   sites on this server) get the same window, and their status page items
+#   are part of the same report.
 #
 # A reboot is noticed by a systemd unit (whm/betterstack-whm-maintenance.service)
 # while the network is still up. Maintenance ends at boot, or at the latest on
@@ -54,8 +57,8 @@ sub window {
     my @wd  = qw(sun mon tue wed thu fri sat);
     my %day = ( $wd[ $f[6] ] => 1, $wd[ $t[6] ] => 1 );
     return {
-        maintenance_from     => sprintf( '%02d:%02d', $f[2], $f[1] ),
-        maintenance_to       => sprintf( '%02d:%02d', $t[2], $t[1] ),
+        maintenance_from     => sprintf( '%02d:%02d:00', $f[2], $f[1] ),
+        maintenance_to       => sprintf( '%02d:%02d:00', $t[2], $t[1] ),
         maintenance_timezone => 'UTC',
         maintenance_days     => [ grep { $day{$_} } qw(mon tue wed thu fri sat sun) ],
     };
@@ -77,16 +80,30 @@ sub start {
     my $api = BetterStack::WHM::API->from_config($cfg);
     my ( @errors, %prev );
 
-    for my $it ( grep { $_->{heartbeat_id} } values %{ $st->{items} } ) {
-        my ($d) = $api->request( 'GET', "/heartbeats/$it->{heartbeat_id}" );
+    # Remember the current maintenance settings, then set the window.
+    my $set = sub {
+        my ( $kind, $id ) = @_;
+        my ($d) = $api->request( 'GET', "/$kind/$id" );
         my $a = ref $d eq 'HASH' && ref $d->{data} eq 'HASH' ? $d->{data}{attributes} || {} : {};
-        my ( undef, $err ) = $api->update_heartbeat( $it->{heartbeat_id}, window( $from, $to ) );
-        if ($err) { push @errors, [ 'e.err', [ 'mt.e_window', $it->{heartbeat_id} ], $err ]; next }
-        $prev{ $it->{heartbeat_id} } = { map { $_ => $a->{$_} } @WINDOW };
-    }
+        my ( undef, $err ) = $api->request( 'PATCH', "/$kind/$id", window( $from, $to ) );
+        if ($err) { push @errors, [ 'e.err', [ 'mt.e_window', "$kind/$id" ], $err ]; return }
+        $prev{"$kind/$id"} = { map { $_ => $a->{$_} } @WINDOW };
+    };
+    $set->( heartbeats => $_->{heartbeat_id} ) for grep { $_->{heartbeat_id} } values %{ $st->{items} };
+    my @monitors = grep { /^\d{1,20}\z/ } @{ $cfg->{maint_monitors} || [] };
+    $set->( monitors => $_ ) for @monitors;
 
     my $report;
-    my @res = map { { status_page_resource_id => $_->{resource_id} + 0, status => 'maintenance' } } grep { $_->{resource_id} } values %{ $st->{items} };
+    my %res = map { $_->{resource_id} => 1 } grep { $_->{resource_id} } values %{ $st->{items} };
+    if ( @monitors && $cfg->{maint_report} && $st->{status_page_id} ) {
+        # Status page items of the chosen monitors.
+        my %mon = map { $_ => 1 } @monitors;
+        my ($list) = $api->list_resources( $st->{status_page_id} );
+        $res{ $_->{id} } = 1
+          for grep { ( $_->{attributes}{resource_type} // '' ) eq 'Monitor' && $mon{ $_->{attributes}{resource_id} // '' } && ( $_->{id} // '' ) =~ /^\d{1,20}\z/ }
+          grep { ref $_ eq 'HASH' && ref $_->{attributes} eq 'HASH' } @{ $list || [] };
+    }
+    my @res = map { { status_page_resource_id => $_ + 0, status => 'maintenance' } } sort keys %res;
     if ( $cfg->{maint_report} && @res && $st->{status_page_id} ) {
         my $lang = BetterStack::WHM::Checks::public_lang($cfg);
         my ( $d, $err ) = $api->request(
@@ -109,7 +126,7 @@ sub start {
         }
     }
 
-    $st->{maintenance} = { since => $from, until => $to, reason => $reason, heartbeats => \%prev, ( $report ? ( report_id => $report, page => $st->{status_page_id} ) : () ) };
+    $st->{maintenance} = { since => $from, until => $to, reason => $reason, restore => \%prev, ( $report ? ( report_id => $report, page => $st->{status_page_id} ) : () ) };
     logmsg( info => [ 'mt.log_start', ["mt.reason_$reason"], $minutes ] );
     logmsg( error => $_ ) for @errors;
     return \@errors;
@@ -122,10 +139,13 @@ sub finish {
     my $m = active($st) or return [];
     my $api = BetterStack::WHM::API->from_config($cfg);
     my @errors;
-    for my $id ( keys %{ $m->{heartbeats} || {} } ) {
-        my $p = $m->{heartbeats}{$id} || {};
-        my ( undef, $err ) = $api->update_heartbeat( $id, { map { $_ => $p->{$_} } @WINDOW } );
-        push @errors, [ 'e.err', [ 'mt.e_window', $id ], $err ] if $err && ( $api->{last_status} // 0 ) != 404;
+    my %restore = %{ $m->{restore} || {} };
+    $restore{"heartbeats/$_"} = $m->{heartbeats}{$_} for keys %{ $m->{heartbeats} || {} };    # state of the first version
+    for my $key ( keys %restore ) {
+        next unless $key =~ m{^(heartbeats|monitors)/(\d{1,20})\z};
+        my $p = $restore{$key} || {};
+        my ( undef, $err ) = $api->request( 'PATCH', "/$key", { map { $_ => $p->{$_} } @WINDOW } );
+        push @errors, [ 'e.err', [ 'mt.e_window', $key ], $err ] if $err && ( $api->{last_status} // 0 ) != 404;
     }
     my $now = time;
     if ( $m->{report_id} && $now < $m->{until} ) {

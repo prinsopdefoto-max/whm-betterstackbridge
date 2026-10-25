@@ -244,8 +244,11 @@ instead of an outage:
     Better Stack reports the outage after all.
   - Optionally, the status page shows a maintenance report with this server's items marked as
     *maintenance*, and subscribers can be e-mailed.
-- **Booting.** As soon as the network is up, the maintenance ends: the heartbeats get their
-  previous settings back, the maintenance report on the status page ends, and all checks report
+- **Other monitors.** Under *Also these monitors* you can pick monitors from your Better Stack
+  account that depend on this server, such as the websites hosted on it. They get the same
+  maintenance window, and their status page items are part of the same maintenance report.
+- **Booting.** As soon as the network is up, the maintenance ends: the heartbeats (and chosen
+  monitors) get their previous settings back, the maintenance report on the status page ends, and all checks report
   right away. If that fails, the next cron run does it.
 - **Crashes and power failures** have no clean shutdown, so they are still reported as outages.
 

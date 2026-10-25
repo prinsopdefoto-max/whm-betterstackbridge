@@ -277,6 +277,15 @@ BetterStack::WHM::Engine::run();
     is_deeply( $st->{items}, $before->{items}, 'heartbeats untouched' );
 }
 
+# ---- history for the charts in WHM
+{
+    require BetterStack::WHM::History;
+    my $h = BetterStack::WHM::History::load();
+    ok( @{ $h->{load}{m}{load} || [] }, 'load recorded for the sparkline' );
+    is( $h->{load}{s}[-1][1], 'ok', 'hourly status recorded' );
+    ok( !$h->{fakeoff}, 'tests of switched-off checks are not recorded' );
+}
+
 # ---- cleanup
 $st = BetterStack::WHM::Config::load_state();
 my $errs = BetterStack::WHM::Engine::cleanup( $cfg, $st );

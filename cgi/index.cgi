@@ -17,6 +17,7 @@ use BetterStack::WHM::API ();
 use BetterStack::WHM::Checks ();
 use BetterStack::WHM::Config ();
 use BetterStack::WHM::Engine ();
+use BetterStack::WHM::History ();
 use BetterStack::WHM::I18N qw(T render render_msg);
 use BetterStack::WHM::UIStrings ();
 use BetterStack::WHM::Update ();
@@ -62,6 +63,7 @@ if ( ( $ENV{REQUEST_METHOD} // '' ) eq 'POST' && $action ) {
 
 my $cfg = BetterStack::WHM::Config::load();
 my $st  = BetterStack::WHM::Config::load_state();
+my $hist = BetterStack::WHM::History::load();
 $BetterStack::WHM::I18N::LANG = ui_lang($cfg);
 $tab ||= BetterStack::WHM::Config::is_configured($cfg) ? 'overview' : 'settings';
 
@@ -520,6 +522,9 @@ sub panel_overview {
     $o .= kpi( scalar @$units, T('ui.heartbeats'), 'hb' );
     $o .= '</div>';
 
+    $o .= closest_card( [ map { @{ $_->{members} } } @$units ] );
+    $o .= legend() if @$units;
+
     # one card per heartbeat (bundle or own item)
     $o .= '<div class="bsw-units">';
     for my $u (@$units) {
@@ -537,9 +542,9 @@ sub panel_overview {
         for my $inst ( @{ $u->{members} } ) {
             my $r    = $st->{results}{ $inst->{id} } || {};
             my $info = render( $r->{info} );
-            $o .= sprintf '<li>%s<div class="bsw-m-body"><div class="bsw-m-name">%s</div><div class="bsw-m-detail">%s</div>%s</div><time class="bsw-num">%s</time></li>',
+            $o .= sprintf '<li>%s<div class="bsw-m-body"><div class="bsw-m-name">%s</div><div class="bsw-m-detail">%s</div>%s%s</div><time class="bsw-num">%s</time></li>',
               dot( $r->{status} ), h( render_msg( $inst->{name_msg} ) ), h( render( $r->{detail} ) || T('ui.no_data') ),
-              length $info ? '<div class="bsw-m-info" title="' . th('ui.private') . '">' . icon('lock') . h($info) . '</div>' : '', h( ago( $r->{at} ) );
+              length $info ? '<div class="bsw-m-info" title="' . th('ui.private') . '">' . icon('lock') . h($info) . '</div>' : '', member_viz( $inst, $r ), h( ago( $r->{at} ) );
         }
         $o .= '</ul>';
         if ( $it->{explanation_sent} ) {
@@ -550,6 +555,171 @@ sub panel_overview {
     $o .= '<p class="bsw-empty">' . th('ui.nothing_enabled') . '</p>' unless @$units;
     $o .= '</div></section>';
     return $o;
+}
+
+# ---------------------------------------------------------------- charts
+#
+# Meters (current value against the thresholds), 24-hour sparklines and
+# hourly status strips, drawn as inline HTML/SVG. Data: the metrics of the
+# latest results and BetterStack::WHM::History.
+
+sub metric_status {
+    my ($m) = @_;
+    my ( $v, $w, $c ) = @$m{qw(v w c)};
+    if ( ( $m->{d} // 'up' ) eq 'down' ) {
+        return 'fail' if defined $c && $v <= $c;
+        return 'warn' if defined $w && $v <= $w;
+        return 'ok';
+    }
+    return 'fail' if defined $c && $v >= $c;
+    return 'warn' if defined $w && $v >= $w;
+    return 'ok';
+}
+
+sub fmt_metric {
+    my ( $m, $v ) = @_;
+    $v //= $m->{v};
+    my $u = $m->{u} // '';
+    return sprintf( '%.0f%%', $v ) if $u eq 'pct';
+    return T( 'ui.m_load', sprintf '%.2f', $v ) if $u eq 'load';
+    return T( 'ui.m_days', sprintf '%.0f', $v ) if $u eq 'days';
+    return T( 'ui.m_hours', sprintf '%.0f', $v ) if $u eq 'hours';
+    return sprintf '%.0f', $v;
+}
+
+# Value range of a metric's meter and sparkline: percentages 0-100, otherwise
+# from 0 to a bit beyond the outage threshold (or the highest value seen).
+sub metric_scale {
+    my ( $m, $series ) = @_;
+    return ( 0, 100 ) if ( $m->{u} // '' ) eq 'pct';
+    my $limit = $m->{c} // $m->{w} // 0;
+    if ( ( $m->{d} // 'up' ) eq 'down' ) { my $t = $m->{w} // $m->{c} // 10; return ( 0, $t * 3 > 30 ? $t * 3 : 30 ) }
+    my $hi = $limit * 1.15;
+    for ( $m->{v}, map { $_->[1] } @{ $series || [] } ) { $hi = $_ * 1.05 if defined && $_ * 1.05 > $hi }
+    return ( 0, $hi > 0 ? $hi : 1 );
+}
+
+sub _frac { my ( $v, $lo, $hi ) = @_; my $f = ( $v - $lo ) / ( $hi - $lo ); return $f < 0 ? 0 : $f > 1 ? 1 : $f }
+
+sub threshold_text {
+    my ($m) = @_;
+    my @t;
+    push @t, T( 'ui.thr_warn', fmt_metric( $m, $m->{w} ) ) if defined $m->{w};
+    push @t, T( 'ui.thr_crit', fmt_metric( $m, $m->{c} ) ) if defined $m->{c};
+    return join ' · ', @t;
+}
+
+sub meter {
+    my ( $m, $series ) = @_;
+    my ( $lo, $hi ) = metric_scale( $m, $series );
+    my $ms    = metric_status($m);
+    my $ticks = '';
+    for ( [ w => 'warn' ], [ c => 'fail' ] ) {
+        my $t = $m->{ $_->[0] };
+        next unless defined $t && $t > $lo && $t < $hi;
+        $ticks .= sprintf '<span class="bsw-tick bsw-tick-%s" style="left:%.1f%%"></span>', $_->[1], 100 * _frac( $t, $lo, $hi );
+    }
+    return sprintf '<span class="bsw-meter bsw-mt-%s" role="img" aria-label="%s" title="%s"><span class="bsw-meter-fill" style="width:%.1f%%"></span>%s</span>', $ms,
+      h( fmt_metric($m) . ', ' . threshold_text($m) ), h( fmt_metric($m) . ' · ' . threshold_text($m) ), 100 * _frac( $m->{v}, $lo, $hi ), $ticks;
+}
+
+# 24-hour line; the threshold as a dashed line, the latest value as a dot.
+sub sparkline {
+    my ( $id, $m, $interval ) = @_;
+    my $series = ( ( $hist->{$id} || {} )->{m} || {} )->{ $m->{k} } || [];
+    return '<span class="bsw-spark bsw-spark-empty"></span>' if @$series < 2;
+    my ( $W, $H, $pad ) = ( 76, 22, 3 );
+    my ( $lo, $hi ) = metric_scale( $m, $series );
+    my $now = time;
+    my $x = sub { sprintf '%.1f', $pad + ( $W - 2 * $pad ) * _frac( $_[0], $now - 86400, $now ) };
+    my $y = sub { sprintf '%.1f', $H - $pad - ( $H - 2 * $pad ) * _frac( $_[0], $lo, $hi ) };
+    my $gap = 2 * ( $interval > $BetterStack::WHM::History::POINT ? $interval : $BetterStack::WHM::History::POINT ) + 60;
+    my ( $d, $prev, @xs, @tips ) = ('');
+    for my $p (@$series) {
+        $d .= ( !$prev || $p->[0] - $prev > $gap ? 'M' : 'L' ) . $x->( $p->[0] ) . ',' . $y->( $p->[1] );
+        $prev = $p->[0];
+        push @xs, $x->( $p->[0] );
+        push @tips, POSIX::strftime( '%H:%M', localtime $p->[0] ) . ' · ' . fmt_metric( $m, $p->[1] );
+    }
+    my $thr  = $m->{w} // $m->{c};
+    my $line = defined $thr && $thr > $lo && $thr < $hi
+      ? sprintf( '<line class="bsw-spark-thr" x1="%s" x2="%s" y1="%s" y2="%s"/>', $pad, $W - $pad, ( $y->($thr) ) x 2 )
+      : '';
+    my $last = $series->[-1];
+    my @vals = map { $_->[1] } @$series;
+    my ( $min, $max ) = ( sort { $a <=> $b } @vals )[ 0, -1 ];
+    return sprintf '<svg class="bsw-spark" viewBox="0 0 %d %d" width="%d" height="%d" role="img" aria-label="%s" data-x="%s" data-tips="%s">'
+      . '<title>%s</title>%s<path class="bsw-spark-line" d="%s"/><line class="bsw-spark-cross" x1="0" x2="0" y1="0" y2="%d"/>'
+      . '<circle class="bsw-spark-dot bsw-sd-%s" cx="%s" cy="%s" r="2.5"/></svg>',
+      $W, $H, $W, $H, th( 'ui.spark', fmt_metric( $m, $min ), fmt_metric( $m, $max ) ), join( ',', @xs ), h( join '|', @tips ),
+      th( 'ui.spark', fmt_metric( $m, $min ), fmt_metric( $m, $max ) ), $line, $d, $H,
+      metric_status( { %$m, v => $last->[1] } ), $x->( $last->[0] ), $y->( $last->[1] );
+}
+
+# One cell per hour for the last 24 hours, worst status of that hour.
+sub status_strip {
+    my ($id) = @_;
+    my $cells = BetterStack::WHM::History::hours( $hist, $id, time, 24 );
+    return '' unless grep { defined $_->[1] } @$cells;
+    return '<div class="bsw-strip" role="img" aria-label="' . th('ui.strip') . '">' . join(
+        '',
+        map {
+            my $s = $_->[1] // 'none';
+            sprintf '<span class="bsw-h bsw-h-%s" title="%s"></span>', $s,
+              h( POSIX::strftime( '%H:00', localtime $_->[0] ) . '–' . POSIX::strftime( '%H:00', localtime $_->[0] + 3600 ) . ' · ' . ( $_->[1] ? status_word($s) : T('ui.no_data') ) )
+        } @$cells
+    ) . '</div>';
+}
+
+sub member_viz {
+    my ( $inst, $r ) = @_;
+    my @ms = @{ $r->{metrics} || [] };
+    my $o  = '';
+    for my $m (@ms) {
+        my $series = ( ( $hist->{ $inst->{id} } || {} )->{m} || {} )->{ $m->{k} };
+        $o .= '<div class="bsw-mrow">' . ( @ms > 1 && $m->{l} ? '<span class="bsw-mlabel">' . h( render_msg( $m->{l} ) ) . '</span>' : '' )
+          . meter( $m, $series ) . '<span class="bsw-mval bsw-num">' . h( fmt_metric($m) ) . '</span>' . sparkline( $inst->{id}, $m, $inst->{interval} ) . '</div>';
+    }
+    $o .= status_strip( $inst->{id} );
+    return length $o ? '<div class="bsw-viz">' . $o . '</div>' : '';
+}
+
+# How close a metric is to its warning threshold (1 = at the threshold).
+sub pressure {
+    my ($m) = @_;
+    my $limit = $m->{w} // $m->{c};
+    return undef unless defined $limit && defined $m->{v};
+    return $m->{v} <= 0 ? 99 : $limit / $m->{v} if ( $m->{d} // 'up' ) eq 'down';
+    return $limit > 0 ? $m->{v} / $limit : 0;
+}
+
+sub closest_card {
+    my ($instances) = @_;
+    my @rows;
+    for my $inst (@$instances) {
+        my $r = $st->{results}{ $inst->{id} } or next;
+        for my $m ( @{ $r->{metrics} || [] } ) {
+            my $p = pressure($m);
+            push @rows, [ $p, $inst, $m ] if defined $p;
+        }
+    }
+    return '' unless @rows;
+    @rows = ( sort { $b->[0] <=> $a->[0] } @rows )[ 0 .. ( $#rows < 4 ? $#rows : 4 ) ];
+    my $o = '<section class="bsw-card bsw-closest"><div class="bsw-closest-head"><h3>' . th('ui.closest') . '</h3><span class="bsw-muted">' . th('ui.closest_d') . '</span></div><ul>';
+    for (@rows) {
+        my ( undef, $inst, $m ) = @$_;
+        my $series = ( ( $hist->{ $inst->{id} } || {} )->{m} || {} )->{ $m->{k} };
+        $o .= sprintf '<li><span class="bsw-cl-name">%s%s<em>%s</em></span>%s<span class="bsw-mval bsw-num">%s</span>%s</li>', dot( metric_status($m) ),
+          h( render_msg( $inst->{name_msg} ) . ( $m->{l} ? ' · ' . render_msg( $m->{l} ) : '' ) ), h( threshold_text($m) ), meter( $m, $series ), h( fmt_metric($m) ),
+          sparkline( $inst->{id}, $m, $inst->{interval} );
+    }
+    return $o . '</ul></section>';
+}
+
+sub legend {
+    return '<div class="bsw-legend"><span>' . th('ui.legend') . '</span>'
+      . join( '', map { sprintf '<span><i class="bsw-h bsw-h-%s"></i>%s</span>', $_, h( $_ eq 'none' ? T('ui.no_data') : status_word($_) ) } qw(ok warn fail none) )
+      . '<span><i class="bsw-legend-thr"></i>' . th('ui.legend_thr') . '</span></div>';
 }
 
 sub kpi {
@@ -863,6 +1033,26 @@ sub script {
   });
   if (location.hash.length > 1) show(location.hash.slice(1)); else show(root.getAttribute('data-start'));
 
+  // Sparklines: crosshair and tooltip with the time and value nearest to the pointer.
+  var tip = document.createElement('div');
+  tip.className = 'bsw-tip';
+  tip.hidden = true;
+  root.appendChild(tip);
+  root.querySelectorAll('svg.bsw-spark').forEach(function (svg) {
+    var xs = svg.getAttribute('data-x').split(',').map(Number), tips = svg.getAttribute('data-tips').split('|');
+    var cross = svg.querySelector('.bsw-spark-cross'), w = svg.viewBox.baseVal.width;
+    svg.addEventListener('mousemove', function (e) {
+      var r = svg.getBoundingClientRect(), x = (e.clientX - r.left) * w / r.width, best = 0;
+      for (var i = 1; i < xs.length; i++) if (Math.abs(xs[i] - x) < Math.abs(xs[best] - x)) best = i;
+      cross.setAttribute('x1', xs[best]); cross.setAttribute('x2', xs[best]); cross.style.visibility = 'visible';
+      tip.textContent = tips[best];
+      tip.style.left = (r.left + xs[best] * r.width / w) + 'px';
+      tip.style.top = r.top + 'px';
+      tip.hidden = false;
+    });
+    svg.addEventListener('mouseleave', function () { tip.hidden = true; cross.style.visibility = 'hidden'; });
+  });
+
   // Test buttons of switched-off checks: run the test in the background and
   // replace only its result, so the page does not reload or scroll away.
   root.addEventListener('click', function (e) {
@@ -1054,6 +1244,39 @@ sub style {
 .bsw-m-info{display:flex;gap:6px;align-items:flex-start;margin-top:5px;color:var(--mu);font:11.5px/1.5 "JetBrains Mono",Menlo,Consolas,monospace}
 .bsw-m-info .bsw-ic{width:12px;height:12px;margin-top:2px;color:var(--mu2)}
 .bsw-members time{color:var(--mu2);font-size:12px;white-space:nowrap}
+.bsw-viz{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.bsw-mrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(40px,auto) 76px;gap:10px;align-items:center}
+.bsw-mlabel{grid-column:1/-1;font-size:11px;color:var(--mu);margin-bottom:-4px}
+.bsw-mval{font-size:12px;color:var(--ink2);text-align:right;white-space:nowrap}
+.bsw-meter{position:relative;display:block;height:8px;border-radius:4px;background:var(--ac-l)}
+.bsw-meter-fill{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--ac);min-width:2px}
+.bsw-mt-warn{background:rgba(247,144,9,.16)}.bsw-mt-warn .bsw-meter-fill{background:var(--warn)}
+.bsw-mt-fail{background:rgba(240,68,56,.16)}.bsw-mt-fail .bsw-meter-fill{background:var(--fail)}
+.bsw-tick{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;border-radius:1px;box-shadow:0 0 0 1px var(--card)}
+.bsw-tick-warn{background:var(--warn)}.bsw-tick-fail{background:var(--fail-t)}
+.bsw-spark{display:block;overflow:visible;cursor:crosshair}
+.bsw-spark-empty{display:block;width:76px;height:22px}
+.bsw-spark-line{fill:none;stroke:var(--mu);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.bsw-spark-thr{stroke:var(--warn);stroke-width:1;stroke-dasharray:2 2}
+.bsw-spark-cross{stroke:var(--ink2);stroke-width:1;visibility:hidden}
+.bsw-spark-dot{stroke:var(--card);stroke-width:1.5}
+.bsw-sd-ok{fill:var(--ac)}.bsw-sd-warn{fill:var(--warn)}.bsw-sd-fail{fill:var(--fail)}
+.bsw-strip{display:flex;gap:2px}
+.bsw-h{flex:1;height:10px;border-radius:2px;background:var(--line2);display:inline-block}
+.bsw-h-ok{background:var(--ok)}.bsw-h-warn{background:var(--warn)}.bsw-h-fail{background:var(--fail)}
+.bsw-tip{position:fixed;z-index:50;pointer-events:none;padding:4px 8px;border-radius:5px;background:var(--ink);color:#fff;font-size:12px;white-space:nowrap;transform:translate(-50%,-130%)}
+.bsw-closest{padding:16px 20px;margin-bottom:20px}
+.bsw-closest-head{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-bottom:8px}
+.bsw-closest-head h3{font-size:14px}
+.bsw-closest ul{list-style:none;margin:0;padding:0}
+.bsw-closest li{display:grid;grid-template-columns:minmax(180px,1.2fr) minmax(120px,2fr) minmax(56px,auto) 76px;gap:14px;align-items:center;padding:8px 0}
+.bsw-closest li+li{border-top:1px solid var(--line2)}
+.bsw-cl-name{display:flex;gap:8px;align-items:center;min-width:0;font-weight:500}
+.bsw-cl-name em{font-style:normal;font-weight:400;color:var(--mu);font-size:12px;margin-left:auto;white-space:nowrap}
+.bsw-legend{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin:0 0 12px;font-size:12px;color:var(--mu)}
+.bsw-legend span{display:inline-flex;gap:6px;align-items:center}
+.bsw-legend .bsw-h{flex:none;width:10px}
+.bsw-legend-thr{display:inline-block;width:14px;border-top:1px dashed var(--warn)}
 .bsw-unit-pub{padding:12px 18px 14px 21px;background:var(--bg);border-top:1px solid var(--line);font-size:12px;color:var(--ink2)}
 .bsw-unit-pub .bsw-label{margin-bottom:4px}
 
@@ -1181,7 +1404,8 @@ sub style {
 
 @media (max-width:1040px){.bsw-summary{grid-template-columns:repeat(4,1fr)}.bsw-banner{grid-column:1/-1}.bsw-summary>div:nth-child(2){border-left:0}
  .bsw-summary>.bsw-kpi{border-top:1px solid var(--line)}.bsw-group{grid-template-columns:1fr;gap:12px}.bsw-adv{margin-left:0}}
-@media (max-width:720px){.bsw-head{padding:16px}.bsw-summary{grid-template-columns:1fr 1fr}.bsw-summary>div:nth-child(4){border-left:0}
+@media (max-width:720px){.bsw-closest li{grid-template-columns:minmax(0,1fr) minmax(40px,auto) 76px}.bsw-cl-name{grid-column:1/-1;flex-wrap:wrap}.bsw-cl-name em{flex-basis:100%;margin-left:16px}
+.bsw-head{padding:16px}.bsw-summary{grid-template-columns:1fr 1fr}.bsw-summary>div:nth-child(4){border-left:0}
  .bsw-units,.bsw-grid{columns:1;grid-template-columns:1fr}.bsw-setting{grid-template-columns:1fr;gap:6px}.bsw-setting-label{padding-top:0}
  .bsw-row{grid-template-columns:44px 1fr 56px}.bsw-row>span:nth-child(3){grid-column:1/-1;order:4}.bsw-row-head>span:nth-child(3){display:none}.bsw-fields,.bsw-seg{grid-template-columns:1fr}
  .bsw-steps li+li{border-left:0;border-top:1px solid var(--line)}.bsw-log li{grid-template-columns:1fr;gap:2px}.bsw-inline input{width:100%}}

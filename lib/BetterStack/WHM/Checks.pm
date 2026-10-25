@@ -7,6 +7,11 @@ package BetterStack::WHM::Checks;
 #   detail: may be published on the (public) status page
 #   info:   private, only shown inside WHM (may contain domain names etc.)
 # TEXT is a list of translatable fragments, see BetterStack::WHM::I18N.
+#
+# Optional metrics => [ { k, v, w, c, u, d, l } ] feed the charts in WHM:
+#   k key, v value, w/c warning and outage threshold, u unit (pct, load,
+#   count, days, hours), d direction ('up': higher is worse, 'down': lower is
+#   worse), l optional label (a translatable message, for checks with more than one).
 
 use strict;
 use warnings;
@@ -305,8 +310,9 @@ sub run_load {
     my $per    = $l[1] / $cpus;                       # 5 minute average
     my $status = level( $per, $ts->{warn_per_cpu}, $ts->{crit_per_cpu} );
     return {
-        status => $status,
-        detail => [ [ 'r.load', ( map { sprintf '%.2f', $_ } @l ), $cpus, $per * 100 ] ],
+        status  => $status,
+        detail  => [ [ 'r.load', ( map { sprintf '%.2f', $_ } @l ), $cpus, $per * 100 ] ],
+        metrics => [ { k => 'load', v => 0 + sprintf( '%.2f', $per ), w => $ts->{warn_per_cpu}, c => $ts->{crit_per_cpu}, u => 'load', d => 'up' } ],
     };
 }
 
@@ -330,7 +336,11 @@ sub run_memory {
         my $swap_used = $m->{SwapTotal} - ( $m->{SwapFree} || 0 );
         push @$detail, [ 'r.swap', 100 * $swap_used / $m->{SwapTotal} ];
     }
-    return { status => level( $used_pct, $ts->{warn_pct}, $ts->{crit_pct} ), detail => $detail };
+    return {
+        status  => level( $used_pct, $ts->{warn_pct}, $ts->{crit_pct} ),
+        detail  => $detail,
+        metrics => [ { k => 'mem', v => 0 + sprintf( '%.1f', $used_pct ), w => $ts->{warn_pct}, c => $ts->{crit_pct}, u => 'pct', d => 'up' } ],
+    };
 }
 
 # ---------------------------------------------------------------- disk
@@ -386,7 +396,11 @@ sub run_disk {
     my $status = worst( level( $r->{pct}, $ts->{warn_pct}, $ts->{crit_pct} ), level( $r->{inode_pct}, $ts->{inode_warn_pct}, $ts->{inode_crit_pct} ) );
     return {
         status => $status,
-        detail => [ [ 'r.disk', $r->{pct}, { bytes => $r->{avail} * 1024 }, { bytes => $r->{total} * 1024 } ], [ 'r.inodes', $r->{inode_pct} ] ],
+        detail  => [ [ 'r.disk', $r->{pct}, { bytes => $r->{avail} * 1024 }, { bytes => $r->{total} * 1024 } ], [ 'r.inodes', $r->{inode_pct} ] ],
+        metrics => [
+            { k => 'space',  v => 0 + $r->{pct},       w => $ts->{warn_pct},       c => $ts->{crit_pct},       u => 'pct', d => 'up', l => ['m.space'] },
+            { k => 'inodes', v => 0 + $r->{inode_pct}, w => $ts->{inode_warn_pct}, c => $ts->{inode_crit_pct}, u => 'pct', d => 'up', l => ['m.inodes'] },
+        ],
     };
 }
 
@@ -418,7 +432,11 @@ sub run_mailqueue {
     my ( $code, $out ) = run_cmd( 60, $exim, '-bpc' );
     _die( 'err.cmd', 'exim -bpc', $out ) unless $code == 0 && $out =~ /^\s*(\d+)/;
     my $n = $1;
-    return { status => level( $n, $ts->{warn}, $ts->{crit} ), detail => [ [ 'r.queue', $n ] ] };
+    return {
+        status  => level( $n, $ts->{warn}, $ts->{crit} ),
+        detail  => [ [ 'r.queue', $n ] ],
+        metrics => [ { k => 'queue', v => 0 + $n, w => $ts->{warn}, c => $ts->{crit}, u => 'count', d => 'up' } ],
+    };
 }
 
 # ---------------------------------------------------------------- rbl
@@ -567,7 +585,8 @@ sub run_ssl {
     push @$detail, [ 'r.ssl_soon', @crit + @warn ] if @crit || @warn;
     my $info = [ ( @crit ? [ 'r.ssl_crit', join( ', ', @crit ) ] : () ), ( @warn ? [ 'r.ssl_warn', join( ', ', @warn ) ] : () ) ];
     $info = [ [ 'r.ssl_first', $soonest_name ] ] if !@$info && $soonest_name;
-    return { status => $status, detail => $detail, info => [ @$info, @skip_info ] };
+    my $metrics = defined $soonest ? [ { k => 'days', v => $soonest, w => $ts->{warn_days}, c => $ts->{crit_days}, u => 'days', d => 'down' } ] : [];
+    return { status => $status, detail => $detail, info => [ @$info, @skip_info ], metrics => $metrics };
 }
 
 # ---------------------------------------------------------------- backup
@@ -602,7 +621,11 @@ sub run_backup {
     elsif ( $state eq 'running' ) { $key = 'r.backup_running' }
     else                          { $key = 'r.backup_ok' }
     if ( $age_h > $ts->{max_age_hours} ) { $status = 'fail'; $key = 'r.backup_old' }
-    return { status => $status, detail => [ [ $key, $ago ] ] };
+    return {
+        status  => $status,
+        detail  => [ [ $key, $ago ] ],
+        metrics => [ { k => 'age', v => 0 + sprintf( '%.1f', $age_h ), c => $ts->{max_age_hours}, u => 'hours', d => 'up' } ],
+    };
 }
 
 # ---------------------------------------------------------------- raid

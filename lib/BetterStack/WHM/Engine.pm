@@ -18,6 +18,7 @@ use File::Path qw(make_path);
 use BetterStack::WHM::API ();
 use BetterStack::WHM::Checks ();
 use BetterStack::WHM::Config ();
+use BetterStack::WHM::History ();
 use BetterStack::WHM::Util qw(var_dir logmsg http_request);
 use BetterStack::WHM::I18N qw(T tl render render_msg);
 
@@ -568,6 +569,7 @@ sub run {
             delete @{ $st->{preview} }{ map { $_->{id} } @instances } if $st->{preview};    # live results take over
 
             # 1. Run the checks that are due.
+            my $hist = BetterStack::WHM::History::load();
             for my $inst (@instances) {
                 next if $opt{only} && $opt{only} ne $inst->{id};
                 my $prev = $st->{results}{ $inst->{id} };
@@ -577,6 +579,11 @@ sub run {
                 $summary{ran}++;
                 logmsg( warn => "$inst->{id}: $res->{status} - " . render( $res->{detail} ) . ( length render( $res->{info} ) ? ' (' . render( $res->{info} ) . ')' : '' ) ) if $res->{status} ne 'ok';
                 $st->{results}{ $inst->{id} } = $res;
+                BetterStack::WHM::History::record( $hist, $inst->{id}, $res, $res->{at} );
+            }
+            if ( $summary{ran} ) {
+                BetterStack::WHM::History::prune( $hist, { map { $_->{id} => 1 } @instances }, $now );
+                BetterStack::WHM::History::save($hist);
             }
 
             # 2. Report every unit that is due or whose status changed.

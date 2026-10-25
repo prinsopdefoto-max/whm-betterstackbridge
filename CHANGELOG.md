@@ -14,7 +14,8 @@ All notable changes to this project are documented here. The format follows
 - **Reboots as maintenance.** A clean reboot is reported to Better Stack as maintenance, through a
   systemd unit: a maintenance window on the heartbeats (alerts resume if the server does not come
   back in time) and optionally a maintenance report on the status page. Maintenance can also be
-  started by hand in WHM or with `bswhm maintenance start`.
+  started by hand in WHM or with `bswhm maintenance start`. Other Better Stack monitors that depend
+  on the server (for example its websites) can share the maintenance.
 - **Charts on the overview.** Meters with threshold marks, 24-hour sparklines and hourly status
   strips per check, plus *Closest to a threshold* at the top. History is stored locally in
   `history.json` and never sent anywhere.

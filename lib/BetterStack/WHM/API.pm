@@ -67,6 +67,7 @@ sub _with_team {
 
 sub status_pages         { $_[0]->_list('/status-pages') }
 sub list_heartbeats      { $_[0]->_list('/heartbeats') }
+sub list_monitors        { $_[0]->_list('/monitors') }
 sub list_hb_groups       { $_[0]->_list('/heartbeat-groups') }
 sub list_resources       { $_[0]->_list("/status-pages/$_[1]/resources") }
 sub get_status_page      { $_[0]->request( 'GET', "/status-pages/$_[1]" ) }

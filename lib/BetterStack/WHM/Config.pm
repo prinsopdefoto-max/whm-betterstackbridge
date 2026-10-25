@@ -28,6 +28,7 @@ sub defaults {
         maint_minutes    => 15,            # expected duration of a reboot
         maint_report     => 1,             # maintenance report on the status page
         maint_notify     => 0,             # e-mail status page subscribers about it
+        maint_monitors   => [],            # ids of other Better Stack monitors that share the maintenance
         checks           => {},
         instances        => {},
         group_names      => {},

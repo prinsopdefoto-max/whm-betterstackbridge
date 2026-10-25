@@ -1,0 +1,22 @@
+# StatusBridge for WHM: announces a reboot or power-off to Better Stack as
+# maintenance, and ends it when the server is back.
+#
+# Stopping this unit is what happens during a shutdown. Because it starts after
+# the network (and the local resolvers), it is stopped while the network is
+# still up. "bswhm maintenance start --if-shutdown" does nothing when only this
+# unit is stopped or restarted.
+[Unit]
+Description=StatusBridge for WHM: report reboots as maintenance
+Wants=network-online.target
+After=network-online.target nss-lookup.target named.service pdns.service unbound.service systemd-resolved.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/cpanel/3rdparty/bin/perl /opt/betterstack-whm/bin/bswhm maintenance end --boot
+ExecStop=/usr/local/cpanel/3rdparty/bin/perl /opt/betterstack-whm/bin/bswhm maintenance start --if-shutdown
+TimeoutStartSec=180
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

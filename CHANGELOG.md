@@ -11,6 +11,10 @@ All notable changes to this project are documented here. The format follows
   *Status page* tab for a single check, on the *Checks* tab for a whole check type) and shows its
   result there, without reloading the page. Nothing is sent to Better Stack, so it never pings a
   heartbeat or opens an incident. On the command line: `bswhm check --all`.
+- **Reboots as maintenance.** A clean reboot is reported to Better Stack as maintenance, through a
+  systemd unit: a maintenance window on the heartbeats (alerts resume if the server does not come
+  back in time) and optionally a maintenance report on the status page. Maintenance can also be
+  started by hand in WHM or with `bswhm maintenance start`.
 - **Charts on the overview.** Meters with threshold marks, 24-hour sparklines and hourly status
   strips per check, plus *Closest to a threshold* at the top. History is stored locally in
   `history.json` and never sent anywhere.

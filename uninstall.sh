@@ -10,6 +10,12 @@ PERL=/usr/local/cpanel/3rdparty/bin/perl
 
 rm -f /etc/cron.d/betterstack-whm
 
+if [ -f /etc/systemd/system/betterstack-whm-maintenance.service ]; then
+    systemctl disable --now betterstack-whm-maintenance.service >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/betterstack-whm-maintenance.service
+    systemctl daemon-reload || true
+fi
+
 if [ "${1:-}" = "--purge" ] && [ -x /opt/betterstack-whm/bin/bswhm ]; then
     echo "Removing items from Better Stack ..."
     "$PERL" /opt/betterstack-whm/bin/bswhm cleanup || echo "Clean-up in Better Stack reported errors, please check manually."

@@ -24,6 +24,10 @@ sub defaults {
         publish_details  => 1,
         details_interval => 300,
         delete_removed   => 1,
+        maint_enabled    => 1,             # announce reboots as maintenance
+        maint_minutes    => 15,            # expected duration of a reboot
+        maint_report     => 1,             # maintenance report on the status page
+        maint_notify     => 0,             # e-mail status page subscribers about it
         checks           => {},
         instances        => {},
         group_names      => {},

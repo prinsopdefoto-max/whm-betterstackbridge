@@ -42,6 +42,13 @@ done
 echo "Installing the cron job ..."
 install -m 0644 "$SRC/whm/betterstack-whm.cron" /etc/cron.d/betterstack-whm
 
+if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+    echo "Installing the reboot hook (maintenance in Better Stack during a reboot) ..."
+    install -m 0644 "$SRC/whm/betterstack-whm-maintenance.service" /etc/systemd/system/betterstack-whm-maintenance.service
+    systemctl daemon-reload
+    systemctl enable --now betterstack-whm-maintenance.service >/dev/null 2>&1 || echo "Could not enable the reboot hook." >&2
+fi
+
 echo "Checking syntax ..."
 for f in "$PREFIX"/lib/BetterStack/WHM/*.pm "$PREFIX/bin/bswhm"; do
     "$PERL" -I"$PREFIX/lib" -c "$f" >/dev/null 2>&1 || { echo "Syntax error in $f" >&2; "$PERL" -I"$PREFIX/lib" -c "$f"; exit 1; }

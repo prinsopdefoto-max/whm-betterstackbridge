@@ -146,7 +146,7 @@ own section and heartbeat group, based on its server name.
 
 | Tab | Contents |
 |---|---|
-| **Overview** | System status, counters, and a card per heartbeat with its checks, private details (WHM only) and the text currently shown on the status page. |
+| **Overview** | System status, counters, the measurements closest to a threshold, and a card per heartbeat with its checks, private details (WHM only) and the text currently shown on the status page. |
 | **Status page** | Per category: which checks are on, their public names, the bundle name, and which checks get their own heartbeat. |
 | **Checks** | Interval, thresholds and published details for each check. |
 | **Settings** | Connection, status page, layout, languages, alert channels and behaviour, update check, plus a danger zone that removes everything from Better Stack. |
@@ -158,6 +158,16 @@ on the server in the background and shows the result right there, without reload
 Nothing is sent to Better Stack, so it never pings a heartbeat or opens an incident. (Without
 JavaScript the page reloads and jumps back to the result; unsaved changes on that tab are then
 lost.)
+
+**Charts on the overview.** Every measurable check (CPU load, memory, disk space and inodes, mail
+queue, SSL days left, backup age) shows:
+- a meter with the current value and marks at its warning and outage thresholds;
+- a 24-hour sparkline with the threshold as a dashed line (hover for the time and value);
+- for every check, a strip with its worst status per hour over the last 24 hours.
+
+At the top, *Closest to a threshold* lists the five measurements with the least room before their
+warning threshold. The history is kept on the server only (`history.json`, about a day of
+5-minute points) and starts filling after the update.
 
 The page only loads local assets (no external fonts, scripts or images). It also works without
 JavaScript and on small screens.
@@ -270,6 +280,7 @@ The internal paths and the Perl namespace use the technical name `betterstack-wh
 | `/var/lib/betterstack-whm/state.json` | Links to Better Stack objects and latest results (0600) |
 | `/var/lib/betterstack-whm/ssl-dates.json` | Known certificate end dates, so unchanged certificates are not read again (0600) |
 | `/var/log/betterstack-whm.log` | Log (0600) |
+| `/var/lib/betterstack-whm/history.json` | Last 24 hours of measurements and 48 hours of hourly status, for the charts (0600) |
 | `/var/lib/betterstack-whm/install.json` | The clone and commit the plugin was installed from (0600) |
 | `/var/lib/betterstack-whm/update.json` | Result of the latest update check (0600) |
 | `/etc/cron.d/betterstack-whm` | Cron jobs (checks every minute, update check once a day) |

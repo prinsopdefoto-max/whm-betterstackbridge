@@ -18,6 +18,7 @@ use BetterStack::WHM::Checks ();
 use BetterStack::WHM::Config ();
 use BetterStack::WHM::Engine ();
 use BetterStack::WHM::History ();
+use BetterStack::WHM::Maintenance ();
 use BetterStack::WHM::I18N qw(T render render_msg);
 use BetterStack::WHM::UIStrings ();
 use BetterStack::WHM::Update ();
@@ -108,7 +109,8 @@ sub handle_action {
         $cfg->{api_base} = 'https://incidents.betterstack.com/api/v2' unless $cfg->{api_base} =~ m{^https://[\w.-]+(/[\w./-]*)?$};
         $cfg->{status_page_id} = '' unless $cfg->{status_page_id} =~ /^\d*$/;
         $cfg->{section_mode} = ( $f->{section_mode} // '' ) eq 'category' ? 'category' : 'single';
-        $cfg->{$_} = $f->{$_} ? 1 : 0 for qw(alert_email alert_sms alert_call alert_push publish_details delete_removed);
+        $cfg->{$_} = $f->{$_} ? 1 : 0 for qw(alert_email alert_sms alert_call alert_push publish_details delete_removed maint_enabled maint_report maint_notify);
+        $cfg->{maint_minutes} = int num( $f->{maint_minutes}, $cfg->{maint_minutes}, 1, 720 );
         $cfg->{grace_pct}        = num( $f->{grace_pct},        $cfg->{grace_pct},        0,  500 );
         $cfg->{details_interval} = num( $f->{details_interval}, $cfg->{details_interval}, 60, 86400 );
         $cfg->{ui_lang}     = BetterStack::WHM::I18N::valid( $f->{ui_lang} )     ? $f->{ui_lang}     : 'auto' if defined $f->{ui_lang};
@@ -177,6 +179,22 @@ sub handle_action {
         die "invalid check\n" if $by_type && !$BetterStack::WHM::Checks::TYPES{$what};
         my $r = BetterStack::WHM::Engine::preview( $by_type ? ( type => $what ) : ( only => $what ) );
         report( $r, T( 'ui.preview_done', $r->{ran} // 0 ) );
+    }
+    elsif ( $action eq 'maint_start' || $action eq 'maint_end' ) {
+        my $start = $action eq 'maint_start';
+        my $r     = BetterStack::WHM::Engine::with_lock(
+            sub {
+                my $st   = BetterStack::WHM::Config::load_state();
+                my $errs = $start
+                  ? BetterStack::WHM::Maintenance::start( $cfg, $st, reason => 'manual', minutes => num( $f->{maint_minutes}, $cfg->{maint_minutes}, 1, 720 ) )
+                  : BetterStack::WHM::Maintenance::finish( $cfg, $st );
+                BetterStack::WHM::Config::save_state($st);
+                return { ok => !@$errs, errors => $errs };
+            },
+            wait => 1,
+        );
+        report( $r, T( $start ? 'mt.started_ui' : 'mt.ended' ) );
+        BetterStack::WHM::Engine::run( force => 1, wait => 1 ) if !$start;    # green again right away
     }
     elsif ( $action eq 'update_check' ) {
         my $s = BetterStack::WHM::Update::check();
@@ -463,6 +481,11 @@ sub render_page {
         $o .= sprintf '<div class="bsw-flash bsw-f-%s">%s<div>%s</div></div>', h( $m->[0] ), icon($ic), h( $m->[1] );
     }
 
+    if ( my $m = BetterStack::WHM::Maintenance::active($st) ) {
+        $o .= form_open( 'maint_end', $tab, 'bsw-flash bsw-f-info bsw-maint' ) . icon('clock') . '<div>'
+          . th( 'mt.active', POSIX::strftime( '%d-%m-%Y %H:%M', localtime $m->{since} ), POSIX::strftime( '%H:%M', localtime $m->{until} ) )
+          . '</div><button class="bsw-btn bsw-btn-sm">' . th('mt.end_now') . '</button></form>';
+    }
     if ($upd_available) {
         $o .= '<div class="bsw-flash bsw-f-info">' . icon('refresh') . '<div>' . th( 'upd.available', $upd->{count} // 1 )
           . ' <a href="#settings" data-goto="settings" class="bsw-link">' . th('upd.show') . '</a></div></div>';
@@ -912,6 +935,13 @@ sub panel_settings {
             T('ui.live_details_help') )
           . field( T('ui.cleanup_opt'), switch( 'delete_removed', $cfg->{delete_removed}, T('ui.cleanup_opt_on') ) ) );
 
+    # maintenance
+    $o .= group( 'clock', T('mt.g_title'), T('mt.g_desc'),
+        field( T('mt.f_reboot'), switch( 'maint_enabled', $cfg->{maint_enabled}, T('mt.f_reboot_on') ), T('mt.f_reboot_help') )
+          . field( T('mt.f_minutes'), sprintf( '<div class="bsw-unit-input"><input type="number" name="maint_minutes" value="%d" min="1" max="720"><em>%s</em></div>', $cfg->{maint_minutes}, th('mt.minutes') ), T('mt.f_minutes_help') )
+          . field( T('mt.f_page'),
+            '<div class="bsw-switches">' . switch( 'maint_report', $cfg->{maint_report}, T('mt.f_report_on') ) . switch( 'maint_notify', $cfg->{maint_notify}, T('mt.f_notify_on') ) . '</div>' ) );
+
     # advanced
     $o .= '<details class="bsw-adv"><summary>' . icon('chevron') . th('ui.g_advanced') . '</summary>'
       . field( T('ui.api_base'), sprintf( '<input type="text" name="api_base" value="%s">', h( $cfg->{api_base} ) ) )
@@ -919,6 +949,13 @@ sub panel_settings {
       . '</details>';
     $o .= savebar( T('ui.settings_note'), T('ui.save_settings') ) . '</form>';
 
+    # Maintenance by hand, for planned work without a reboot.
+    if ( $configured && !BetterStack::WHM::Maintenance::active($st) ) {
+        $o .= form_open( 'maint_start', 'settings', 'bsw-card bsw-maint-start' )
+          . '<div><h3>' . th('mt.manual_title') . '</h3><p class="bsw-muted">' . th('mt.manual_text') . '</p></div>'
+          . sprintf( '<div class="bsw-inline-row"><div class="bsw-unit-input"><input type="number" name="maint_minutes" value="%d" min="1" max="720" aria-label="%s"><em>%s</em></div>', $cfg->{maint_minutes}, th('mt.f_minutes'), th('mt.minutes') )
+          . '<button class="bsw-btn">' . icon('clock') . th('mt.start_now') . '</button></div></form>';
+    }
     $o .= panel_updates();
 
     # danger zone
@@ -1306,6 +1343,9 @@ sub style {
 .bsw-preview-line time{color:var(--mu2)}
 .bsw-preview-line .bsw-m-info{flex-basis:100%;margin-top:0}
 .bsw .bsw-btn.bsw-busy{cursor:progress;opacity:.75}
+.bsw-maint{align-items:center}.bsw-maint>div{flex:1}
+.bsw-maint-start{display:flex;gap:16px;justify-content:space-between;align-items:center;flex-wrap:wrap;padding:16px 20px;margin-top:24px}
+.bsw-maint-start h3{font-size:14px}.bsw-maint-start p{margin:2px 0 0}.bsw-maint-start .bsw-unit-input{width:130px}
 .bsw-upd-ok,.bsw-upd-new{display:flex;gap:7px;align-items:center;margin:0;font-weight:500}
 .bsw-upd-ok .bsw-ic{color:var(--ok-t)}.bsw-upd-new .bsw-ic{color:var(--warn-t)}
 .bsw-commits{list-style:none;margin:8px 0 0;padding:0;border:1px solid var(--line2);border-radius:6px;max-height:260px;overflow:auto}

@@ -14,6 +14,7 @@ use BetterStack::WHM::API ();
 use BetterStack::WHM::I18N qw(T render render_msg);
 use BetterStack::WHM::UIStrings ();
 use BetterStack::WHM::Update ();
+use BetterStack::WHM::Maintenance ();
 
 binmode STDOUT, ':encoding(UTF-8)';
 
@@ -76,6 +77,62 @@ my %commands = (
             my $info = render( $r->{info} );
             printf "%-28s %-5s %s%s%s\n", $i->{id}, $r->{status}, render( $r->{detail} ), length $info ? "  [$info]" : '', $i->{enabled} ? '' : ' (' . T('cli.off') . ')';
         }
+        return 1;
+    },
+    maintenance => sub {
+        my $sub = shift @ARGV // 'status';
+        my %o;
+        while ( my $a = shift @ARGV ) {
+            if    ( $a eq '--minutes' )     { $o{minutes} = shift @ARGV }
+            elsif ( $a eq '--if-shutdown' ) { $o{if_shutdown} = 1 }
+            elsif ( $a eq '--boot' )        { $o{boot} = 1 }
+        }
+        if ( $sub eq 'start' ) {
+            # From systemd while the system shuts down: only for a real reboot or
+            # power-off, and only when switched on in WHM.
+            my $reason = 'manual';
+            if ( $o{if_shutdown} ) {
+                $reason = BetterStack::WHM::Maintenance::shutdown_kind() or return 1;
+                return 1 unless BetterStack::WHM::Config::load()->{maint_enabled};
+            }
+            local $SIG{ALRM} = sub { die "timeout\n" };
+            alarm 50;    # systemd allows 60 seconds
+            my $r = BetterStack::WHM::Engine::with_lock(
+                sub {
+                    my $cfg  = BetterStack::WHM::Config::load();
+                    my $st   = BetterStack::WHM::Config::load_state();
+                    my $errs = BetterStack::WHM::Maintenance::start( $cfg, $st, reason => $reason, minutes => $o{minutes} );
+                    BetterStack::WHM::Config::save_state($st) if BetterStack::WHM::Maintenance::active($st);
+                    return { ok => !@$errs, errors => $errs, m => BetterStack::WHM::Maintenance::active($st) };
+                },
+                wait => 1,
+            );
+            alarm 0;
+            errors( $r->{errors} );
+            print T( 'mt.started', scalar localtime $r->{m}{until} ), "\n" if $r->{m};
+            return $r->{m} ? 1 : 0;
+        }
+        if ( $sub eq 'end' ) {
+            my $was;
+            my $r = BetterStack::WHM::Engine::with_lock(
+                sub {
+                    my $cfg = BetterStack::WHM::Config::load();
+                    my $st  = BetterStack::WHM::Config::load_state();
+                    $was = BetterStack::WHM::Maintenance::active($st) or return { ok => 1, errors => [] };
+                    my $errs = BetterStack::WHM::Maintenance::finish( $cfg, $st );
+                    BetterStack::WHM::Config::save_state($st);
+                    return { ok => !@$errs, errors => $errs };
+                },
+                wait => 1,
+            );
+            errors( $r->{errors} );
+            # Report right away, so the status page turns green without waiting for cron.
+            BetterStack::WHM::Engine::run( force => 1, wait => 1 ) if $was;
+            print T( $was ? 'mt.ended' : 'mt.none' ), "\n" unless $o{boot} && !$was;
+            return $r->{ok};
+        }
+        my $m = BetterStack::WHM::Maintenance::active( BetterStack::WHM::Config::load_state() );
+        print $m ? T( 'mt.active', scalar localtime $m->{since}, scalar localtime $m->{until} ) : T('mt.none'), "\n";
         return 1;
     },
     'update-check' => sub {

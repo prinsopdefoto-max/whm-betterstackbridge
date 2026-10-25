@@ -25,6 +25,7 @@ backups and the server itself are healthy.
 - [Languages](#languages)
 - [Data flow and privacy](#data-flow-and-privacy)
 - [Self-healing synchronisation](#self-healing-synchronisation)
+- [Reboots and maintenance](#reboots-and-maintenance)
 - [Command line](#command-line)
 - [Updating and uninstalling](#updating-and-uninstalling)
 - [Files](#files)
@@ -231,6 +232,27 @@ exists in Better Stack with what it expects:
 
 The state file is written with `fsync` and a backup copy, so it survives a hard reset.
 
+## Reboots and maintenance
+
+A clean reboot (from WHM, a terminal or an update) is reported to Better Stack as **maintenance**
+instead of an outage:
+
+- **Shutting down.** A systemd unit (`betterstack-whm-maintenance.service`) notices the shutdown
+  while the network is still up.
+  - Every heartbeat of this server gets a maintenance window for the expected duration (15
+    minutes by default). It is a time window, not a pause: if the server is not back by then,
+    Better Stack reports the outage after all.
+  - Optionally, the status page shows a maintenance report with this server's items marked as
+    *maintenance*, and subscribers can be e-mailed.
+- **Booting.** As soon as the network is up, the maintenance ends: the heartbeats get their
+  previous settings back, the maintenance report on the status page ends, and all checks report
+  right away. If that fails, the next cron run does it.
+- **Crashes and power failures** have no clean shutdown, so they are still reported as outages.
+
+Settings are under **Settings → Maintenance**. For planned work without a reboot, start
+maintenance there or with `bswhm maintenance start --minutes 30`, and end it with *End
+maintenance* or `bswhm maintenance end`.
+
 ## Command line
 
 ```
@@ -239,6 +261,8 @@ bswhm check --all  the same, including checks that are switched off
 bswhm status       latest results and link state
 bswhm test         test the API token and list status pages
 bswhm update-check look for a new version in the git clone it was installed from
+bswhm maintenance start [--minutes N] | end | status
+                   report maintenance to Better Stack (automatic on a reboot)
 bswhm sync         synchronise now
 bswhm run --force  run and report all checks now
 bswhm cleanup      remove everything this plugin created in Better Stack
@@ -283,6 +307,7 @@ The internal paths and the Perl namespace use the technical name `betterstack-wh
 | `/var/lib/betterstack-whm/history.json` | Last 24 hours of measurements and 48 hours of hourly status, for the charts (0600) |
 | `/var/lib/betterstack-whm/install.json` | The clone and commit the plugin was installed from (0600) |
 | `/var/lib/betterstack-whm/update.json` | Result of the latest update check (0600) |
+| `/etc/systemd/system/betterstack-whm-maintenance.service` | Reports reboots as maintenance |
 | `/etc/cron.d/betterstack-whm` | Cron jobs (checks every minute, update check once a day) |
 
 ## Troubleshooting

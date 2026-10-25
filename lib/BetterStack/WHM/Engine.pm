@@ -19,6 +19,7 @@ use BetterStack::WHM::API ();
 use BetterStack::WHM::Checks ();
 use BetterStack::WHM::Config ();
 use BetterStack::WHM::History ();
+use BetterStack::WHM::Maintenance ();
 use BetterStack::WHM::Util qw(var_dir logmsg http_request);
 use BetterStack::WHM::I18N qw(T tl render render_msg);
 
@@ -588,6 +589,8 @@ sub run {
 
             # 2. Report every unit that is due or whose status changed.
             return finish( $st, $now, \%summary ) unless $configured;
+            # Back from a reboot (or past the planned end): end the maintenance first.
+            push @{ $summary{errors} }, @{ BetterStack::WHM::Maintenance::end_if_due( $cfg, $st ) };
             my $api;
             for my $unit (@$units) {
                 my $it = $st->{items}{ $unit->{key} } or next;
